@@ -5,7 +5,6 @@ import { supabase } from '../../lib/supabase';
 import { TablaActivos } from '../../components/TablaActivos';
 import * as XLSX from 'xlsx';
 
-// Datos estáticos para simular la estructura en cascada: Tipo > Marca > Modelo
 const ESTRUCTURA_HARDWARE: Record<string, Record<string, string[]>> = {
   Laptop: {
     Lenovo: ['ThinkPad T14', 'ThinkPad L14', 'Legion 5'],
@@ -43,7 +42,6 @@ export default function PaginaActivos() {
 
   const [categoriasCatalogo] = useState<string[]>(Object.keys(ESTRUCTURA_HARDWARE));
 
-  // Filtros y Paginación
   const [busqueda, setBusqueda] = useState('');
   const [filtroEstado, setFiltroEstado] = useState('Todos');
   const [ordenarPor, setOrdenarPor] = useState('categoria');
@@ -51,12 +49,10 @@ export default function PaginaActivos() {
   const [paginaActual, setPaginaActual] = useState(1);
   const [seleccionados, setSeleccionados] = useState<number[]>([]);
 
-  // Estados de Modales Dinámicos
   const [modalFormulario, setModalFormulario] = useState<{ open: boolean; modo: 'alta' | 'edicion'; activo?: any }>({ open: false, modo: 'alta' });
   const [modalConfirmarBaja, setModalConfirmarBaja] = useState<{ open: boolean; id: number | null; masivo: boolean }>({ open: false, id: null, masivo: false });
   const [modalConfirmarEliminar, setModalConfirmarEliminar] = useState<{ open: boolean; id: number | null; masivo: boolean }>({ open: false, id: null, masivo: false });
 
-  // Estado del Formulario Unificado (Modal)
   const [formTipo, setFormTipo] = useState('Laptop');
   const [formMarca, setFormMarca] = useState('');
   const [formModelo, setFormModelo] = useState('');
@@ -66,18 +62,14 @@ export default function PaginaActivos() {
   const [formEstado, setFormEstado] = useState('Disponible en Almacén TI');
   const [guardando, setGuardando] = useState(false);
 
-  // Estados para el Módulo de Observaciones / Comentarios
+  // --- BITÁCORA UNIFICADA SINCRONIZADA ---
   const [modalComentarios, setModalComentarios] = useState<{ open: boolean; activoId: number | null; numeroSerie: string }>({ open: false, activoId: null, numeroSerie: '' });
   const [listaComentarios, setListaComentarios] = useState<any[]>([]);
   const [nuevoComentario, setNuevoComentario] = useState('');
   const [tipoObs, setTipoObs] = useState('General');
   const [enviandoComentario, setEnviandoComentario] = useState(false);
 
-  // Estado dinámico real para categorías de la BD
   const [categoriasDinamicas, setCategoriasDinamicas] = useState<string[]>([]);
-  const [nuevaCategoriaInput, setNuevaCategoriaInput] = useState(''); // Para agregar nuevas al vuelo
-
-  // Estado Carga Masiva Archivo
   const [archivoExcel, setArchivoExcel] = useState<File | null>(null);
   const [procesandoMasivo, setProcesandoMasivo] = useState(false);
 
@@ -86,7 +78,6 @@ export default function PaginaActivos() {
       setLoading(true);
       const resOperativos = await supabase.from('vista_activos_completa').select('*').neq('estado_actual', 'Dado de Baja');
       const resBajas = await supabase.from('vista_activos_completa').select('*').eq('estado_actual', 'Dado de Baja');
-      // Traer las categorías reales de la tabla maestra
       const resCategorias = await supabase.from('categorias_activo').select('nombre_categoria');
 
       if (resOperativos.error) throw resOperativos.error;
@@ -105,17 +96,21 @@ export default function PaginaActivos() {
     }
   };
 
+  // --- ADAPTADO EXCLUSIVAMENTE AL ESTÁNDAR 'observaciones_activos' ---
   const abrirHistorialComentarios = async (id: number, serie: string) => {
     setModalComentarios({ open: true, activoId: id, numeroSerie: serie });
     try {
       const { data, error } = await supabase
-        .from('comentarios_activo')
+        .from('observaciones_activos') // Unificado con reporte corporativo
         .select('*')
         .eq('activo_id', id)
         .order('fecha_registro', { ascending: false });
+        
       if (error) throw error;
       setListaComentarios(data || []);
-    } catch (err: any) { alert(err.message); }
+    } catch (err: any) { 
+      alert(err.message); 
+    }
   };
 
   const guardarComentario = async (e: React.FormEvent) => {
@@ -124,20 +119,26 @@ export default function PaginaActivos() {
 
     try {
       setEnviandoComentario(true);
-      const { error } = await supabase.from('comentarios_activo').insert([{
+      const { error } = await supabase.from('observaciones_activos').insert([{
         activo_id: modalComentarios.activoId,
         comentario: nuevoComentario.trim(),
         tipo_observacion: tipoObs,
-        creado_por: 'Jonathan (Admin TI)'
+        creado_por: 'Jonathan (Admin TI)',
+        fecha_registro: new Date().toISOString()
       }]);
 
       if (error) throw error;
 
       setNuevoComentario('');
-      // Recargar la lista de comentarios de este activo
       abrirHistorialComentarios(modalComentarios.activoId, modalComentarios.numeroSerie);
-    } catch (err: any) { alert(err.message); } finally { setEnviandoComentario(false); }
+      cargarDatos(); // Sincroniza la vista maestra de reportes
+    } catch (err: any) { 
+      alert(err.message); 
+    } finally { 
+      setEnviandoComentario(false); 
+    }
   };
+
   const manejarAlternarTodos = () => {
     const idsPagina = datosPaginaActual.map(a => a.id);
     const todosMarcados = idsPagina.every(id => seleccionados.includes(id));
@@ -147,11 +148,11 @@ export default function PaginaActivos() {
       setSeleccionados(prev => [...Array.from(new Set([...prev, ...idsPagina]))]);
     }
   };
+
   useEffect(() => {
     cargarDatos();
   }, []);
 
-  // Manejo de la Cascada en el Formulario
   useEffect(() => {
     if (modalFormulario.modo === 'alta') {
       const marcasDisponibles = Object.keys(ESTRUCTURA_HARDWARE[formTipo] || {});
@@ -197,8 +198,6 @@ export default function PaginaActivos() {
 
     try {
       setGuardando(true);
-
-      // Creamos el objeto limpio con los parámetros requeridos por tu RPC
       const payload = {
         p_id: modalFormulario.modo === 'alta' ? null : modalFormulario.activo.id,
         p_serial_id: formSerie.trim(),
@@ -210,12 +209,9 @@ export default function PaginaActivos() {
         p_estado_actual: formEstado
       };
 
-      // Llamamos a la función inteligente de la base de datos
       const { error } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
-
       if (error) throw error;
 
-      // Cierre silencioso y recarga automática sin molestos popups arriba
       setModalFormulario({ open: false, modo: 'alta' });
       cargarDatos();
     } catch (err: any) {
@@ -305,9 +301,7 @@ export default function PaginaActivos() {
               modelo: String(modeloExcel).trim(),
               especificaciones: row.especificaciones || row['Especificaciones'] || null,
               caf: row.caf || row['Código Patrimonial'] || null,
-              estado_actual: 'Disponible en Almacén TI',
-              anio_fabricacion: 2026,
-              tipo_propiedad: 'Compra'
+              estado_actual: 'Disponible en Almacén TI'
             });
           }
         });
@@ -346,22 +340,19 @@ export default function PaginaActivos() {
     }
   };
 
-  // Filtrado y paginación
   const activosFiltrados = activos.filter((item) => {
     const coincideEstado = filtroEstado === 'Todos' || item.estado_actual === filtroEstado;
-
     const termino = busqueda.toLowerCase().trim();
     if (!termino) return coincideEstado;
 
-    // Si hay término, evaluamos coincidencia en cualquier columna crítica
     const coincideFiltroGlobal =
       String(item.serial_id || '').toLowerCase().includes(termino) ||
       String(item.marca || '').toLowerCase().includes(termino) ||
       String(item.modelo || '').toLowerCase().includes(termino) ||
       String(item.categoria || '').toLowerCase().includes(termino) ||
       String(item.caf || '').toLowerCase().includes(termino) ||
-      String(item.especificaciones || '').toLowerCase().includes(termino) || // 👈 Permite buscar "i7", "16GB", etc.
-      String(item.asignado_a_persona || '').toLowerCase().includes(termino) || // 👈 Permite buscar por nombre de usuario asignado
+      String(item.especificaciones || '').toLowerCase().includes(termino) ||
+      String(item.asignado_a_persona || '').toLowerCase().includes(termino) ||
       String(item.area_asignada || '').toLowerCase().includes(termino);
 
     return coincideEstado && coincideFiltroGlobal;
@@ -397,7 +388,6 @@ export default function PaginaActivos() {
             </button>
           </div>
 
-          {/* FILTROS SUPERIORES */}
           <div className="mb-6 bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-sm">
             <div className="mb-4">
               <label className="block text-sm font-semibold text-slate-700 mb-1">Barra de Búsqueda Inteligente:</label>
@@ -410,7 +400,6 @@ export default function PaginaActivos() {
             </div>
           </div>
 
-          {/* BARRA ACCIONES MASIVAS */}
           {seleccionados.length > 0 && (
             <div className="mb-4 bg-blue-50 border border-blue-200 p-4 rounded-xl flex justify-between items-center">
               <span className="text-sm font-semibold text-blue-800">Elementos marcados: <b>{seleccionados.length}</b></span>
@@ -421,7 +410,6 @@ export default function PaginaActivos() {
             </div>
           )}
 
-          {/* TABLA PRINCIPAL */}
           {loading ? (
             <div className="text-center py-10 text-slate-500 font-medium">⏳ Conectando con Supabase...</div>
           ) : totalFilas > 0 ? (
@@ -430,7 +418,7 @@ export default function PaginaActivos() {
                 activos={datosPaginaActual}
                 seleccionados={seleccionados}
                 onAlternarSeleccion={(id) => setSeleccionados(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id])}
-                onAlternarTodos={manejarAlternarTodos} // 👈 Ahora que ya existe la función, la pasas así de limpio
+                onAlternarTodos={manejarAlternarTodos}
                 onEditar={abrirModalEdicion}
                 onBaja={(id) => setModalConfirmarBaja({ open: true, id, masivo: false })}
                 onEliminar={(id) => setModalConfirmarEliminar({ open: true, id, masivo: false })}
@@ -446,7 +434,6 @@ export default function PaginaActivos() {
             <div className="bg-slate-50 border border-dashed rounded-lg p-8 text-center text-slate-500">No se encontraron registros activos.</div>
           )}
 
-          {/* HISTÓRICO DE BAJAS */}
           <div className="mt-12 border-t border-slate-200 pt-6">
             <h3 className="text-xl font-bold text-red-700 mb-2">Módulo de Rescate Histórico de Bajas TI</h3>
             <p className="text-sm text-slate-500 mb-4">Equipos retirados del inventario activo. Puedes reactivarlos en caso de error.</p>
@@ -470,7 +457,6 @@ export default function PaginaActivos() {
         </>
       )}
 
-      {/* IMPORTADOR MASIVO */}
       {tabActivo === 'importador' && (
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start mb-4">
@@ -506,9 +492,6 @@ export default function PaginaActivos() {
         </div>
       )}
 
-      {/* =============================================================================
-          MODAL UNIFICADO: FORMULARIO ALTA Y EDICIÓN TOTAL DEL ACTIVO
-          ============================================================================= */}
       {modalFormulario.open && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
@@ -582,7 +565,6 @@ export default function PaginaActivos() {
         </div>
       )}
 
-      {/* MODAL CONFIRMAR BAJA */}
       {modalConfirmarBaja.open && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl border p-6 w-full max-w-sm text-center">
@@ -597,13 +579,12 @@ export default function PaginaActivos() {
         </div>
       )}
 
-      {/* MODAL CONFIRMAR ELIMINAR */}
       {modalConfirmarEliminar.open && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-xl border p-6 w-full max-w-sm text-center">
             <span className="text-3xl block mb-2">⚠️</span>
             <h3 className="text-lg font-bold text-red-700 mb-2">¿Eliminar Permanentemente?</h3>
-            <p className="text-slate-500 text-sm mb-5">Esta operación es irreversible. Eliminará el registro físico físico completo de la Base de Datos.</p>
+            <p className="text-slate-500 text-sm mb-5">Esta operación es irreversible. Eliminará el registro físico completo de la Base de Datos.</p>
             <div className="flex justify-center gap-3">
               <button onClick={() => setModalConfirmarEliminar({ open: false, id: null, masivo: false })} className="px-4 py-2 bg-slate-100 rounded-lg text-xs font-bold text-slate-700">Cancelar</button>
               <button onClick={ejecutarEliminacion} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold">Sí, Eliminar Registro</button>
@@ -613,7 +594,7 @@ export default function PaginaActivos() {
       )}
 
       {/* =============================================================================
-          MODAL: BITÁCORA HISTÓRICA DE OBSERVACIONES Y COMENTARIOS DEL ACTIVO
+          MODAL REFACTORIZADO: SINCRONIZADO CON EL CORAZÓN DE REPORTES TI
           ============================================================================= */}
       {modalComentarios.open && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50">
@@ -626,13 +607,12 @@ export default function PaginaActivos() {
               <button onClick={() => setModalComentarios({ open: false, activoId: null, numeroSerie: '' })} className="text-slate-400 hover:text-slate-600 font-bold text-lg">✕</button>
             </div>
 
-            {/* FORMULARIO DE NUEVA OBSERVACIÓN */}
             <form onSubmit={guardarComentario} className="mb-4 bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
               <div className="flex gap-2">
                 <select
                   value={tipoObs}
                   onChange={(e) => setTipoObs(e.target.value)}
-                  className="p-1.5 border rounded-lg bg-white text-xs font-semibold text-slate-700"
+                  className="p-1.5 border rounded-lg bg-white text-xs font-semibold text-slate-700 outline-none"
                 >
                   <option value="General">📝 General</option>
                   <option value="Repotenciación">🚀 Repotenciación</option>
@@ -648,48 +628,55 @@ export default function PaginaActivos() {
                   value={nuevoComentario}
                   onChange={(e) => setNuevoComentario(e.target.value)}
                   placeholder="Ej: Cargador fallando, se cambia por repuesto..."
-                  className="flex-1 p-2 border rounded-lg bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-800"
+                  className="flex-1 p-2 border rounded-lg bg-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-800 text-slate-700"
                   required
                 />
                 <button
                   type="submit"
                   disabled={enviandoComentario}
                   style={{ backgroundColor: 'rgb(1, 71, 118)' }}
-                  className="px-4 py-2 text-white font-semibold rounded-lg text-xs disabled:opacity-50 transition-opacity"
+                  className="px-4 py-2 text-white font-semibold rounded-lg text-xs disabled:opacity-50 transition-opacity font-bold"
                 >
                   {enviandoComentario ? 'Guardando...' : 'Añadir'}
                 </button>
               </div>
             </form>
 
-            {/* LÍNEA DE TIEMPO (TIMELINE) */}
             <div className="flex-1 overflow-y-auto space-y-3 pr-1">
               {listaComentarios.length > 0 ? (
                 listaComentarios.map((c) => {
-                  const esFalla = c.tipo_observacion === 'Falla';
+                  const esFalla = c.tipo_observacion === 'Falla' || c.tipo_observacion === 'Falla Técnica';
                   const esRepotenciacion = c.tipo_observacion === 'Repotenciación';
                   const esMantenimiento = c.tipo_observacion === 'Mantenimiento';
 
                   return (
                     <div
                       key={c.id}
-                      className={`p-3 rounded-xl border text-xs transition-all ${esFalla ? 'bg-red-50/50 border-red-100' : esRepotenciacion ? 'bg-green-50/50 border-green-100' : esMantenimiento ? 'bg-amber-50/50 border-amber-100' : 'bg-slate-50 border-slate-100'
-                        }`}
+                      className={`p-3 rounded-xl border text-xs transition-all ${
+                        esFalla ? 'bg-red-50/50 border-red-100' : 
+                        esRepotenciacion ? 'bg-green-50/50 border-green-100' : 
+                        esMantenimiento ? 'bg-amber-50/50 border-amber-100' : 
+                        'bg-slate-50 border-slate-100'
+                      }`}
                     >
                       <div className="flex justify-between items-center mb-1 text-slate-400 font-medium">
-                        <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] uppercase ${esFalla ? 'bg-red-100 text-red-800' : esRepotenciacion ? 'bg-green-100 text-green-800' : esMantenimiento ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700'
-                          }`}>
+                        <span className={`font-bold px-1.5 py-0.5 rounded text-[10px] uppercase ${
+                          esFalla ? 'bg-red-100 text-red-800' : 
+                          esRepotenciacion ? 'bg-green-100 text-green-800' : 
+                          esMantenimiento ? 'bg-amber-100 text-amber-800' : 
+                          'bg-slate-200 text-slate-700'
+                        }`}>
                           {c.tipo_observacion}
                         </span>
                         <span>{new Date(c.fecha_registro).toLocaleString('es-PE')}</span>
                       </div>
                       <p className="text-slate-800 font-medium">{c.comentario}</p>
-                      <span className="text-[10px] text-slate-400 block mt-1">✍️ Registrado por: {c.creado_por}</span>
+                      <span className="text-[10px] text-slate-400 block mt-1">✍️ Registrado por: {c.creado_por || 'Soporte TI'}</span>
                     </div>
                   );
                 })
               ) : (
-                <div className="text-center py-6 text-slate-400 text-xs border border-dashed rounded-xl">
+                <div className="text-center py-6 text-slate-400 text-xs border border-dashed rounded-xl bg-white">
                   No hay observaciones registradas para este equipo.
                 </div>
               )}
@@ -697,7 +684,6 @@ export default function PaginaActivos() {
           </div>
         </div>
       )}
-
     </main>
   );
 }

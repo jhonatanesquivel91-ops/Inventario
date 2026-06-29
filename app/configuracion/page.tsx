@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 
 export default function PaginaConfiguracion() {
-  const [subTab, setSubTab] = useState<'categorias' | 'marcas' | 'modelos' | 'usuarios' | 'estructura'>('categorias');
+  const [subTab, setSubTab] = useState<'categorias' | 'marcas' | 'modelos' | 'usuarios' | 'estructura' | 'condiciones'>('categorias');
   const [loading, setLoading] = useState(false);
 
   // --- ARREGLOS DE DATOS MAESTROS ---
@@ -14,6 +14,7 @@ export default function PaginaConfiguracion() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [areas, setAreas] = useState<any[]>([]);
   const [cargos, setCargos] = useState<any[]>([]);
+  const [condiciones, setCondiciones] = useState<any[]>([]); // Inyectado para estados de conservación
 
   // --- FILTROS, BÚSQUEDA Y PAGINACIÓN DINÁMICA ---
   const [busquedaColaborador, setBusquedaColaborador] = useState('');
@@ -32,7 +33,7 @@ export default function PaginaConfiguracion() {
   const [selectAreaId, setSelectAreaId] = useState('');
   const [selectCargoId, setSelectCargoId] = useState('');
   
-  // Para sub-gestiones en la pestaña de estructura
+  // Para sub-gestiones en la pestaña de estructura y condiciones
   const [modoEstructura, setModoEstructura] = useState<'area' | 'cargo'>('area');
   const [colorArea, setColorArea] = useState('#1E293B');
 
@@ -42,13 +43,14 @@ export default function PaginaConfiguracion() {
   const cargarCatalogos = async () => {
     try {
       setLoading(true);
-      const [rCat, rMar, rMod, rUsr, rArea, rCargo] = await Promise.all([
+      const [rCat, rMar, rMod, rUsr, rArea, rCargo, rCond] = await Promise.all([
         supabase.from('categorias_activo').select('*').order('nombre_categoria'),
         supabase.from('marcas').select('*, categorias_activo(nombre_categoria)').order('nombre_marca'),
         supabase.from('modelos').select('*, marcas(nombre_marca, categoria_id)').order('nombre_modelo'),
         supabase.from('usuarios').select('*, areas(*), cargos(*)').order('nombre_completo'),
         supabase.from('areas').select('*').order('nombre_area'),
-        supabase.from('cargos').select('*').order('nombre_cargo')
+        supabase.from('cargos').select('*').order('nombre_cargo'),
+        supabase.from('estados_conservacion').select('*').order('nombre_estado') // Jalado nativo
       ]);
 
       if (rCat.data) setCategorias(rCat.data);
@@ -57,6 +59,7 @@ export default function PaginaConfiguracion() {
       if (rUsr.data) setUsuarios(rUsr.data);
       if (rArea.data) setAreas(rArea.data);
       if (rCargo.data) setCargos(rCargo.data);
+      if (rCond.data) setCondiciones(rCond.data);
     } catch (err: any) {
       console.error(err.message);
     } finally {
@@ -98,7 +101,13 @@ export default function PaginaConfiguracion() {
     );
   });
 
-  const datasetActual = subTab === 'categorias' ? categorias : subTab === 'marcas' ? marcasFiltradas : subTab === 'modelos' ? modelosFiltrados : subTab === 'usuarios' ? usuariosFiltrados : modoEstructura === 'area' ? areas : cargos;
+  const datasetActual = 
+    subTab === 'categorias' ? categorias : 
+    subTab === 'marcas' ? marcasFiltradas : 
+    subTab === 'modelos' ? modelosFiltrados : 
+    subTab === 'usuarios' ? usuariosFiltrados : 
+    subTab === 'condiciones' ? condiciones :
+    modoEstructura === 'area' ? areas : cargos;
 
   // Paginación Reactiva Flexible
   const totalFilas = datasetActual.length;
@@ -112,13 +121,14 @@ export default function PaginaConfiguracion() {
     if (!formNombre.trim()) return;
     try {
       setGuardando(true);
-      let tablaDestino = subTab === 'categorias' ? 'categorias_activo' : subTab;
+      let tablaDestino = subTab === 'categorias' ? 'categorias_activo' : subTab === 'condiciones' ? 'estados_conservacion' : subTab;
       let payload: any = {};
 
       if (subTab === 'categorias') payload = { nombre_categoria: formNombre.trim() };
       else if (subTab === 'marcas') payload = { nombre_marca: formNombre.trim(), categoria_id: Number(formPadreId) };
       else if (subTab === 'modelos') payload = { nombre_modelo: formNombre.trim(), marca_id: Number(formPadreId) };
       else if (subTab === 'usuarios') payload = { nombre_completo: formNombre.trim(), dni: formDni.trim(), area_id: selectAreaId ? Number(selectAreaId) : null, cargo_id: selectCargoId ? Number(selectCargoId) : null };
+      else if (subTab === 'condiciones') payload = { nombre_estado: formNombre.trim(), color_alerta: colorArea };
       else if (subTab === 'estructura') {
         tablaDestino = modoEstructura === 'area' ? 'areas' : 'cargos';
         payload = modoEstructura === 'area' ? { nombre_area: formNombre.trim(), color_hex: colorArea } : { nombre_cargo: formNombre.trim() };
@@ -137,20 +147,23 @@ export default function PaginaConfiguracion() {
   const ejecutarEliminar = async () => {
     if (!modalEliminar.id) return;
     const { error } = await supabase.from(modalEliminar.tabla).delete().eq('id', modalEliminar.id);
-    if (error) alert(`No se puede borrar. El elemento está asignado o tiene dependencias.`);
+    if (error) alert(`No se puede borrar. El elemento está asignado o tiene dependencias en el stock.`);
     setModalEliminar({ open: false, id: null, tabla: '' });
     cargarCatalogos();
   };
 
   const abrirEditor = (item: any) => {
     setIdEditando(item.id);
-    setFormNombre(item.nombre_categoria || item.nombre_marca || item.nombre_modelo || item.nombre_completo || item.nombre_area || item.nombre_cargo);
+    setFormNombre(item.nombre_categoria || item.nombre_marca || item.nombre_modelo || item.nombre_completo || item.nombre_area || item.nombre_cargo || item.nombre_estado);
     if (subTab === 'marcas') setFormPadreId(String(item.categoria_id));
     if (subTab === 'modelos') setFormPadreId(String(item.marca_id));
     if (subTab === 'usuarios') {
       setFormDni(item.dni || '');
       setSelectAreaId(item.area_id ? String(item.area_id) : '');
       setSelectCargoId(item.cargo_id ? String(item.cargo_id) : '');
+    }
+    if (subTab === 'condiciones') {
+      setColorArea(item.color_alerta || '#1E293B');
     }
     if (subTab === 'estructura' && modoEstructura === 'area') {
       setColorArea(item.color_hex || '#1E293B');
@@ -162,13 +175,15 @@ export default function PaginaConfiguracion() {
       <h1 className="text-3xl font-bold mb-1" style={{ color: 'rgb(1, 71, 118)' }}>⚙️ Consola Unificada de Catálogos TI</h1>
       <p className="text-slate-500 mb-6">Administración simétrica y modular de las tablas maestras del sistema.</p>
 
-      {/* MENÚ DE SECCIONES (TABS) */}
-      <div className="flex border-b border-slate-200 mb-6 gap-2 bg-slate-50 p-2 rounded-xl text-sm font-semibold">
-        <button onClick={() => setSubTab('categorias')} className={`px-4 py-2 rounded-lg transition-all ${subTab === 'categorias' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'categorias' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>📁 Familias de Hardware</button>
-        <button onClick={() => setSubTab('marcas')} className={`px-4 py-2 rounded-lg transition-all ${subTab === 'marcas' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'marcas' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>🏷️ Marcas Fabricantes</button>
-        <button onClick={() => setSubTab('modelos')} className={`px-4 py-2 rounded-lg transition-all ${subTab === 'modelos' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'modelos' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>📦 Modelos Técnicos</button>
-        <button onClick={() => setSubTab('estructura')} className={`px-4 py-2 rounded-lg transition-all ${subTab === 'estructura' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'estructura' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>🏢 Áreas y Cargos</button>
-        <button onClick={() => setSubTab('usuarios')} className={`px-4 py-2 rounded-lg transition-all ${subTab === 'usuarios' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'usuarios' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>👥 Fichas de Personal</button>
+      {/* MENÚ DE SECCIONES (TABS) ACTUALIZADO */}
+      <div className="flex border-b border-slate-200 mb-6 gap-2 bg-slate-50 p-2 rounded-xl text-sm font-semibold overflow-x-auto">
+        <button onClick={() => setSubTab('categorias')} className={`px-4 py-2 rounded-lg transition-all flex-shrink-0 ${subTab === 'categorias' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'categorias' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>📁 Familias de Hardware</button>
+        <button onClick={() => setSubTab('marcas')} className={`px-4 py-2 rounded-lg transition-all flex-shrink-0 ${subTab === 'marcas' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'marcas' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>🏷️ Marcas Fabricantes</button>
+        <button onClick={() => setSubTab('modelos')} className={`px-4 py-2 rounded-lg transition-all flex-shrink-0 ${subTab === 'modelos' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'modelos' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>📦 Modelos Técnicos</button>
+        <button onClick={() => setSubTab('estructura')} className={`px-4 py-2 rounded-lg transition-all flex-shrink-0 ${subTab === 'estructura' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'estructura' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>🏢 Áreas y Cargos</button>
+        {/* REQUERIMIENTO EXTRA: Nueva Pestaña para Estados de Conservación Física */}
+        <button onClick={() => setSubTab('condiciones')} className={`px-4 py-2 rounded-lg transition-all flex-shrink-0 ${subTab === 'condiciones' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'condiciones' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>⚙️ Condiciones Físicas</button>
+        <button onClick={() => setSubTab('usuarios')} className={`px-4 py-2 rounded-lg transition-all flex-shrink-0 ${subTab === 'usuarios' ? 'bg-white border shadow-sm text-blue-800 font-bold' : 'text-slate-500'}`} style={subTab === 'usuarios' ? { borderColor: 'rgb(1, 71, 118)' } : {}}>👥 Fichas de Personal</button>
       </div>
 
       {/* FILTROS / BÚSQUEDAS */}
@@ -217,7 +232,7 @@ export default function PaginaConfiguracion() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         
-        {/* GRILLA IZQUIERDA (DISEÑO IDÉNTICO PREMIUM CON BORDES DE ACTIVOS) */}
+        {/* GRILLA IZQUIERDA */}
         <div className="lg:col-span-2 space-y-4">
           <div className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
             <table className="w-full border-collapse text-left text-sm text-slate-600">
@@ -229,6 +244,8 @@ export default function PaginaConfiguracion() {
                   {subTab === 'estructura' && modoEstructura === 'area' && <><th className="px-5 py-3.5">Área Corporativa</th><th className="px-5 py-3.5">Identificador Visual</th></>}
                   {subTab === 'estructura' && modoEstructura === 'cargo' && <th className="px-5 py-3.5">Cargo Configurado</th>}
                   {subTab === 'usuarios' && <><th className="px-5 py-3.5">Colaborador Autorizado</th><th className="px-5 py-3.5">Área Asignada</th></>}
+                  {/* Vista de grilla para condiciones */}
+                  {subTab === 'condiciones' && <><th className="px-5 py-3.5">Condición Física</th><th className="px-5 py-3.5">Alerta Color</th></>}
                   <th className="px-5 py-3.5 text-center w-24">Acciones</th>
                 </tr>
               </thead>
@@ -271,6 +288,18 @@ export default function PaginaConfiguracion() {
                         <td className="px-5 py-3.5 font-semibold text-slate-900 border-r border-slate-200">💼 {item.nombre_cargo}</td>
                       )}
 
+                      {subTab === 'condiciones' && (
+                        <>
+                          <td className="px-5 py-3.5 font-bold text-slate-900 border-r border-slate-200">⚙️ {item.nombre_estado}</td>
+                          <td className="px-5 py-3.5 border-r border-slate-200">
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 rounded border" style={{ backgroundColor: item.color_alerta }} />
+                              <span className="px-2 py-0.5 rounded text-white font-mono font-bold text-[10px]" style={{ backgroundColor: item.color_alerta }}>{item.color_alerta}</span>
+                            </div>
+                          </td>
+                        </>
+                      )}
+
                       {subTab === 'usuarios' && (
                         <>
                           <td className="px-5 py-3.5 border-r border-slate-200">
@@ -294,7 +323,7 @@ export default function PaginaConfiguracion() {
                       <td className="px-5 py-3.5 text-center">
                         <div className="flex items-center justify-center gap-4">
                           <button onClick={() => abrirEditor(item)} className="text-slate-400 hover:text-blue-600 text-sm transition-colors" title="Modificar">✏️</button>
-                          <button onClick={() => setModalEliminar({ open: true, id: item.id, tabla: subTab === 'categorias' ? 'categorias_activo' : subTab === 'estructura' ? (modoEstructura === 'area' ? 'areas' : 'cargos') : subTab })} className="text-slate-400 hover:text-red-600 text-sm transition-colors" title="Eliminar">❌</button>
+                          <button onClick={() => setModalEliminar({ open: true, id: item.id, tabla: subTab === 'categorias' ? 'categorias_activo' : subTab === 'condiciones' ? 'estados_conservacion' : subTab === 'estructura' ? (modoEstructura === 'area' ? 'areas' : 'cargos') : subTab })} className="text-slate-400 hover:text-red-600 text-sm transition-colors" title="Eliminar">❌</button>
                         </div>
                       </td>
                     </tr>
@@ -306,7 +335,7 @@ export default function PaginaConfiguracion() {
             </table>
           </div>
 
-          {/* BARRA PAGINACIÓN CONFIGURABLE (15, 30, 50) */}
+          {/* BARRA PAGINACIÓN */}
           <div className="flex flex-col sm:flex-row items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs gap-3">
             <div className="flex items-center gap-2">
               <span>📄 Mostrar:</span>
@@ -367,6 +396,23 @@ export default function PaginaConfiguracion() {
                 <div>
                   <label className="block font-bold text-slate-600 uppercase mb-1">Nombre del Modelo Técnico</label>
                   <input type="text" value={formNombre} onChange={(e) => setFormNombre(e.target.value)} placeholder="Ej: Taurus T6" className="w-full p-2 border rounded bg-white outline-none" required />
+                </div>
+              </>
+            )}
+
+            {/* Formulario adaptado para condiciones físicas */}
+            {subTab === 'condiciones' && (
+              <>
+                <div>
+                  <label className="block font-bold text-slate-600 uppercase mb-1">Nombre de Condición Física</label>
+                  <input type="text" value={formNombre} onChange={(e) => setFormNombre(e.target.value)} placeholder="Ej: Excelente, Moderado, Desgastado" className="w-full p-2 border rounded bg-white outline-none" required />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-600 uppercase mb-1">Color de Alerta Visual</label>
+                  <div className="flex gap-2">
+                    <input type="color" value={colorArea} onChange={(e) => setColorArea(e.target.value)} className="w-10 h-8 border rounded cursor-pointer bg-white p-1" />
+                    <input type="text" value={colorArea} onChange={(e) => setColorArea(e.target.value)} className="flex-1 p-1.5 border rounded bg-white font-mono text-center uppercase" maxLength={7} />
+                  </div>
                 </div>
               </>
             )}
