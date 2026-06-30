@@ -15,29 +15,40 @@ export async function POST(request: Request) {
     const { messages } = await request.json();
     const genAI = new GoogleGenerativeAI(aiKey);
 
-    // CONFIGURACIÓN CON EL MODELO 1.5-FLASH (Cuota independiente y estable)
-    // CAMBIO DE MODELO: Usamos el alias dinámico oficial 'gemini-1.5-flash-latest'
-    // CAMBIO DEFINITIVO: Usamos la versión nativa del ecosistema actual de Google
+    // CONFIGURAMOS EL MODELO CON LAS DOS HERRAMIENTAS (LEER Y ESCRIBIR)
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-2.5-flash', // ← Este es el modelo correcto y vigente
-      systemInstruction: `Eres el Asistente Experto de Soporte Técnico TI - Posgrado UPeU. 
-      Tienes la capacidad de consultar el inventario real en cualquier momento usando la herramienta 'consultarInventarioReal'. 
-      Si el usuario te pregunta por stock, disponibilidad o quiere un análisis, usa SIEMPRE la herramienta primero para tener los datos reales del segundo exacto.
-      Responde siempre de forma ejecutiva, ordenando todo con viñetas y negritas.`,
+      model: 'gemini-2.5-flash', 
+      systemInstruction: `Eres el Asistente Experto de Soporte Técnico TI - Posgrado UPeU.
+      Tienes dos herramientas disponibles para interactuar con la base de datos en tiempo real:
+      1. 'consultarInventarioReal': Úsala cuando el usuario pregunte por stock, marcas, modelos o disponibilidad.
+      2. 'actualizarEstadoActivo': Úsala ÚNICAMENTE cuando el usuario te ordene explícitamente cambiar, actualizar o modificar el estado de un equipo (Ej: 'pásalo a Soporte', 'ponlo como Disponible', 'da de baja el equipo X').
+      
+      Responde siempre de forma ejecutiva, ordenada, usando viñetas y negritas.`,
       tools: [{ 
-        functionDeclarations: [{
-          name: "consultarInventarioReal",
-          description: "Consulta la base de datos de Supabase en tiempo real para obtener el listado de activos, laptops, proyectores, estados y stock de Posgrado UPeU.",
-          parameters: {
-            type: "OBJECT", 
-            properties: {
-              filtroEstado: { 
-                type: "STRING", 
-                description: "Opcional. Filtrar por estado: 'Disponible', 'Asignado', 'En Soporte', 'Baja'." 
-              }
+        functionDeclarations: [
+          {
+            name: "consultarInventarioReal",
+            description: "Consulta la base de datos de Supabase para obtener el listado de activos, laptops, proyectores y stock actual.",
+            parameters: {
+              type: "OBJECT", 
+              properties: {
+                filtroEstado: { type: "STRING", description: "Opcional. 'Disponible', 'Asignado', 'En Soporte', 'Baja'." }
+              },
             },
           },
-        }]
+          {
+            name: "actualizarEstadoActivo",
+            description: "Modifica el estado físico de un activo específico en la base de datos de Supabase.",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                idActivo: { type: "STRING", description: "El ID o código del activo a modificar (Ej: 'ACT-01')." },
+                nuevoEstado: { type: "STRING", description: "El nuevo estado: 'Disponible', 'Asignado', 'En Soporte', 'Baja'." }
+              },
+              required: ["idActivo", "nuevoEstado"]
+            }
+          }
+        ]
       }] as any
     });
 
@@ -51,38 +62,62 @@ export async function POST(request: Request) {
     let result = await chat.sendMessage(ultimoMensaje);
     let response = await result.response;
 
+    // INTERCEPTOR DINÁMICO DE FUNCIONES
     const part = response.candidates?.[0]?.content?.parts?.[0] as any;
     const functionCall = part?.functionCall;
 
-    if (functionCall && functionCall.name === "consultarInventarioReal") {
-      let query = supabase.from('vista_activos_completa').select('*');
-      const args = functionCall.args as any;
-      if (args?.filtroEstado) {
-        query = query.eq('estado', args.filtroEstado);
-      }
-      
-      const { data: datosReales } = await query;
+    if (functionCall) {
+      let respuestaHerramienta = null;
 
-      result = await chat.sendMessage([
-        {
-          functionResponse: {
-            name: "consultarInventarioReal",
-            response: { data: datosReales || [] }
-          }
+      // ACCIÓN 1: LEER BASE DE DATOS
+      if (functionCall.name === "consultarInventarioReal") {
+        let query = supabase.from('vista_activos_completa').select('*');
+        const args = functionCall.args as any;
+        if (args?.filtroEstado) query = query.eq('estado', args.filtroEstado);
+        
+        const { data } = await query;
+        respuestaHerramienta = { data: data || [] };
+      } 
+      
+      // ACCIÓN 2: ESCRIBIR / ACTUALIZAR BASE DE DATOS
+      else if (functionCall.name === "actualizarEstadoActivo") {
+        const args = functionCall.args as any;
+        
+        const { data, error } = await supabase
+          .from('activos') // Ajusta al nombre real de tu tabla de edición si no es 'activos'
+          .update({ estado: args.nuevoEstado })
+          .eq('id', args.idActivo)
+          .select();
+
+        if (error) {
+          respuestaHerramienta = { error: `No se pudo actualizar: ${error.message}` };
+        } else {
+          respuestaHerramienta = { operacion: "Exitosa", detalle: `Activo ${args.idActivo} cambiado a ${args.nuevoEstado}` };
         }
-      ] as any);
-      response = await result.response;
+      }
+
+      // Devolvemos el resultado de la base de datos a Gemini para que redacte su respuesta final
+      if (respuestaHerramienta) {
+        result = await chat.sendMessage([
+          {
+            functionResponse: {
+              name: functionCall.name,
+              response: respuestaHerramienta
+            }
+          }
+        ] as any);
+        response = await result.response;
+      }
     }
 
     return NextResponse.json({ texto: response.text() });
 
   } catch (error: any) {
-    console.error("🚨 ERROR EN CHAT EN TIEMPO REAL:", error);
+    console.error("🚨 ERROR EN CONSOLA TI:", error);
     
-    // DETECTOR DE AGOTAMIENTO DE CRÉDITOS / CUOTA (ERROR 429)
     if (error.message && (error.message.includes('429') || error.message.includes('quota') || error.message.includes('Quota exceeded'))) {
       return NextResponse.json({ 
-        texto: "⚠️ **Jonathan, se han agotado los créditos diarios gratuitos de Google para este modelo.**\n\nEl límite de consultas de la capa gratuita se ha completado por hoy. Para solucionar esto de forma permanente y seguir chateando sin límites con el inventario, considera activar el plan **Pay-as-you-go** en tu consola de Google AI Studio." 
+        texto: "⚠️ **Jonathan, se han agotado los créditos diarios gratuitos de Google para este modelo.**\n\nEl límite de la capa gratuita se completó por hoy. Mañana temprano podrás continuar interactuando y modificando tu inventario en tiempo real." 
       });
     }
 
