@@ -7,6 +7,7 @@ import { TablaControl } from '@/components/TablaControl';
 import { BuscadorControl } from '@/components/BuscadorControl';
 import { FiltroSelect } from '@/components/FiltroSelect';
 import { ModalBase } from '@/components/ModalBase';
+import { BitacoraNotas } from '@/components/BitacoraNotas';
 import * as XLSX from 'xlsx';
 
 const ESTRUCTURA_HARDWARE: Record<string, Record<string, string[]>> = {
@@ -591,32 +592,23 @@ export default function StockActivosPage() {
         </div>
       </ModalBase>
 
-      {/* --- BITÁCORA DE COMENTARIOS --- */}
-      <ModalBase isOpen={modalComments.open} onClose={() => setModalComments({ open: false, id: null, serie: '' })} titulo="💬 Bitácora de Incidencias Técnicas" subtitulo={`Mapeo de Serie: ${modalComments.serie}`}>
-        <div className="space-y-3 flex flex-col max-h-[60vh]">
-          <form onSubmit={guardarComentario} className="bg-slate-50 p-2.5 rounded-xl border space-y-2 flex-shrink-0">
-            <select value={tipoObs} onChange={(e) => setTipoObs(e.target.value)} className="p-1 border bg-white rounded text-[10px] font-bold text-slate-700 outline-none">
-              <option value="General">📝 General</option>
-              <option value="Falla">⚠️ Falla Técnica</option>
-              <option value="Mantenimiento">🔧 Mantenimiento</option>
-            </select>
-            <div className="flex gap-2">
-              <input type="text" value={nuevoComentario} onChange={(e) => setNuevoComentario(e.target.value)} placeholder="Ej: Cambio de pantalla por falla física..." className="flex-1 p-2 border rounded-lg outline-none text-xs text-slate-800" required />
-              <button type="submit" style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="px-3 text-white font-bold rounded-lg text-xs flex-shrink-0">Añadir</button>
-            </div>
-          </form>
-          <div className="flex-1 overflow-y-auto space-y-2 pr-0.5">
-            {listaComentarios.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-[10px]">No se registran notas técnicas.</div> :
-              listaComentarios.map(c => (
-                <div key={c.id} className={`p-2.5 rounded-xl border text-[11px] font-medium ${c.tipo_observacion === 'Falla' ? 'bg-red-50/40 border-red-100 text-red-800' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
-                  <div className="flex justify-between text-[9px] text-slate-400 font-bold mb-0.5"><span className="uppercase">{c.tipo_observacion}</span><span>{new Date(c.fecha_registro).toLocaleDateString('es-PE')}</span></div>
-                  <p className="text-slate-800 leading-normal">{c.comentario}</p>
-                </div>
-              ))
-            }
-          </div>
-        </div>
-      </ModalBase>
+      {/* --- BITÁCORA DE COMENTARIOS UNIFICADA --- */}
+<ModalBase 
+  isOpen={modalComments.open} 
+  onClose={() => setModalComments({ open: false, id: null, serie: '' })} 
+  titulo="💬 Historial de Observaciones de Hardware"
+>
+  <BitacoraNotas 
+    numeroSerie={modalComments.serie}
+    tipoObs={tipoObs}
+    setTipoObs={setTipoObs}
+    nuevoComentario={nuevoComentario}
+    setNuevoComentario={setNuevoComentario}
+    enviandoComentario={false} // Si no usas cargando en esta hoja, puedes poner false
+    onGuardarComentario={guardarComentario}
+    listaComentarios={listaComentarios}
+  />
+</ModalBase>
     </div>
   );
 }
