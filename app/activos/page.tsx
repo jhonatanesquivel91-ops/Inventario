@@ -125,12 +125,12 @@ export default function StockActivosPage() {
       // 2. 🔀 FUSIÓN SENIOR: Cruzamos la data de la vista con los atributos nuevos de la tabla física
       const registrosCombinados = datosVista.map(item => {
         const coincidenciaFisica = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
-        
+
         return {
           ...item,
           id: item.activo_id,
           // Inyectamos los valores reales de la tabla física
-          tipo_propiedad: coincidenciaFisica?.tipo_propiedad || 'Compra', 
+          tipo_propiedad: coincidenciaFisica?.tipo_propiedad || 'Compra',
           fecha_fin_alquiler: coincidenciaFisica?.fecha_fin_alquiler || null
         };
       });
@@ -248,8 +248,8 @@ export default function StockActivosPage() {
           'Número de Serie': a.serial_id,
           'Código CAF': a.caf || 'N/A',
           'Especificaciones Técnicas': a.especificaciones || 'Sin detalles', // 👈 ¡COLUMNA RESTAURADA AQUÍ!
-          'Régimen Propiedad': a.tipo_propiedad || 'Compra', 
-          'Vencimiento Alquiler': a.fecha_fin_alquiler ? new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE') : 'N/A', 
+          'Régimen Propiedad': a.tipo_propiedad || 'Compra',
+          'Vencimiento Alquiler': a.fecha_fin_alquiler ? new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE') : 'N/A',
           'Condición Física': a.condicion || 'Excelente',
           'Estado Operativo': a.estado_actual,
           'Custodio Asignado': a.nombre_completo || 'Almacén Central TI',
@@ -296,7 +296,7 @@ export default function StockActivosPage() {
     e.preventDefault();
     if (!formSerie.trim()) return lanzarAlerta("La serie es requerida.");
     if (formTipoPropiedad === 'Alquiler' && !formFechaFinAlquiler) return lanzarAlerta("Especifique la fecha de fin del alquiler.");
-    
+
     try {
       setGuardando(true);
       const hoy = new Date().toISOString();
@@ -336,13 +336,13 @@ export default function StockActivosPage() {
       // 3. 🛡️ SECCIÓN CORE: Forzamos la actualización de datos extendidos (Alta y Edición)
       if (idReal) {
         const objEstado = condicionesCatalogo.find(c => c.nombre_estado === formCondicion);
-        
+
         const payloadExtendida: any = {
           estado_conservacion_id: objEstado ? Number(objEstado.id) : null,
           tipo_propiedad: formTipoPropiedad,
           fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler : null
         };
-        
+
         if (modalForm.modo === 'alta') {
           payloadExtendida.fecha_registro = hoy;
         }
@@ -359,10 +359,10 @@ export default function StockActivosPage() {
       setModalForm({ open: false, modo: 'alta' });
       lanzarAlerta("✅ Activo sincronizado correctamente con sus parámetros de propiedad.");
       cargarDatos();
-    } catch (err: any) { 
-      lanzarAlerta(`❌ Error de sincronización: ${err.message}`); 
-    }  finally { 
-      setGuardando(false); 
+    } catch (err: any) {
+      lanzarAlerta(`❌ Error de sincronización: ${err.message}`);
+    } finally {
+      setGuardando(false);
     }
   };
 
@@ -436,10 +436,31 @@ export default function StockActivosPage() {
       {/* CONTROLES MASIVOS */}
       {seleccionados.length > 0 && (
         <div className="bg-slate-900 border px-4 py-2 rounded-xl flex items-center justify-between text-white flex-shrink-0 animate-fade-in">
-          <span className="text-[11px] font-bold uppercase tracking-wider">📦 Bloque Seleccionado: <code className="bg-blue-600 px-2 py-0.5 rounded text-[10px] ml-1">{seleccionados.length} u</code></span>
+          <span className="text-[11px] font-bold uppercase tracking-wider">
+            📦 Bloque Seleccionado: <code className="bg-blue-600 px-2 py-0.5 rounded text-[10px] ml-1">{seleccionados.length} u</code>
+          </span>
           <div className="flex gap-2">
-            <button onClick={() => setModalConfirmarBaja({ open: true, id: null, masivo: true, restaurar: false })} className="px-3 py-1 bg-amber-500 text-slate-900 font-black text-[10px] uppercase rounded-lg">Cambiar a Baja</button>
-            <button onClick={() => setModalConfirmarEliminar({ open: true, id: null, masivo: true })} className="px-3 py-1 bg-red-600 text-white font-black text-[10px] uppercase rounded-lg">Eliminar Lote</button>
+            {/* 🆕 NUEVO BOTÓN: Restaurar lote completo a Stock Disponible */}
+            <button
+              onClick={() => setModalConfirmarBaja({ open: true, id: null, masivo: true, restaurar: true })}
+              className="px-3 py-1 bg-emerald-600 text-white font-black text-[10px] uppercase rounded-lg hover:bg-emerald-700 transition-all"
+            >
+              Restaurar Stock
+            </button>
+
+            <button
+              onClick={() => setModalConfirmarBaja({ open: true, id: null, masivo: true, restaurar: false })}
+              className="px-3 py-1 bg-amber-500 text-slate-900 font-black text-[10px] uppercase rounded-lg hover:bg-amber-600 transition-all"
+            >
+              Cambiar a Baja
+            </button>
+
+            <button
+              onClick={() => setModalConfirmarEliminar({ open: true, id: null, masivo: true })}
+              className="px-3 py-1 bg-red-600 text-white font-black text-[10px] uppercase rounded-lg hover:bg-red-700 transition-all"
+            >
+              Eliminar Lote
+            </button>
           </div>
         </div>
       )}
@@ -519,12 +540,33 @@ export default function StockActivosPage() {
           {
             header: "Asignación Custodia",
             field: "nombre_completo",
-            render: (a) => a.estado_actual === 'Asignado' ? <div><div className="font-bold text-slate-900">👤 {a.nombre_completo.split(' ')[0]}</div><div className="text-[9px] text-slate-400">{a.nombre_area}</div></div> : <span className="text-slate-400 font-bold italic text-[11px]">📦 Almacén TI</span>
+            render: (a) => a.estado_actual === 'Asignado' ? (
+              <div>
+                {/* SE ELIMINÓ EL .split(' ')[0] PARA MOSTRAR EL NOMBRE COMPLETO */}
+                <div className="font-bold text-slate-900">👤 {a.nombre_completo}</div>
+                <div className="text-[9px] text-slate-400">{a.nombre_area}</div>
+              </div>
+            ) : (
+              <span className="text-slate-400 font-bold italic text-[11px]">📦 Almacén TI</span>
+            )
           },
           {
             header: "Estado",
             field: "estado_actual",
             render: (a) => <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${a.estado_actual === 'Asignado' ? 'bg-blue-50 border-blue-100 text-slate-600' : a.estado_actual === 'Dado de Baja' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>{a.estado_actual.replace('Disponible en ', '')}</span>
+          },
+          {
+            header: "Fecha Registro",
+            field: "fecha_registro",
+            render: (a) => (
+              <div className="font-mono text-[10px] text-slate-600 font-bold">
+                📅 {a.fecha_registro ? new Date(a.fecha_registro).toLocaleDateString('es-PE', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  year: 'numeric'
+                }) : '—'}
+              </div>
+            )
           },
           {
             header: "Acciones",

@@ -417,6 +417,19 @@ export default function PaginaReportes() {
       }
     },
     {
+      header: "Asignado Desde",
+      field: "fecha_registro",
+      render: (item: any) => (
+        <div className="font-mono text-[10px] text-slate-600 font-bold leading-tight">
+          📅 {item.fecha_registro ? new Date(item.fecha_registro).toLocaleDateString('es-PE', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric'
+          }) : '—'}
+        </div>
+      )
+    },
+    {
       header: <span onClick={() => manejarSort('conservacion')} className="cursor-pointer select-none block w-full h-full">Condición Física{renderFlechaSort('conservacion')}</span>,
       field: "nombre_estado",
       className: "w-36 text-center",

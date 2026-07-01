@@ -54,10 +54,9 @@ export default function RootLayout({
       const ahora = new Date();
       ahora.setHours(0, 0, 0, 0);
 
-      // 1. 🛡️ CONSULTA CORREGIDA: Quitamos "marca" y "modelo" que hacían romper la base de datos
       const [resPrestamos, resActivos] = await Promise.all([
         supabase.from('prestamos').select('*'),
-        supabase.from('activos').select('id, caf, tipo_propiedad, fecha_fin_alquiler, serial_id')
+        supabase.from('activos').select('id, caf, tipo_propiedad, fecha_fin_alquiler, serial_id, estado_actual')
       ]);
 
       if (resPrestamos.error) console.error("⚠️ Error en préstamos:", resPrestamos.error.message);
@@ -78,11 +77,15 @@ export default function RootLayout({
           fechaLimite.setHours(0, 0, 0, 0);
 
           if (fechaLimite < ahora && p.alerta_activa !== false) {
+            
+            // 🛡️ FILTRO CRÍTICO: Buscamos el activo y validamos que NO esté dado de baja
+            const activoVinculado = activos.find(a => Number(a.id) === Number(p.activo_id));
+            if (activoVinculado?.estado_actual === 'Dado de Baja') return; // Si es baja, ignoramos la alerta
+
             const fechaFormateada = new Date(p.fecha_devolucion_estimada).toLocaleDateString('es-PE', {
               day: '2-digit', month: '2-digit', year: 'numeric'
             });
 
-            const activoVinculado = activos.find(a => Number(a.id) === Number(p.activo_id));
             const identificadorCaf = activoVinculado?.caf ? `[CAF: ${activoVinculado.caf}] ` : '';
             const textoActivoFinal = `${identificadorCaf}${p.nombre_activo || 'Hardware de Retén'}`;
 
@@ -105,6 +108,9 @@ export default function RootLayout({
       // LÓGICA B: PROCESAR CONTRATOS DE ALQUILER (RENTING)
       // ==========================================
       activos.forEach(a => {
+        // 🛡️ FILTRO CRÍTICO: Si el equipo de alquiler está de baja, salta el bucle inmediatamente
+        if (a.estado_actual === 'Dado de Baja') return;
+
         if (String(a.tipo_propiedad).trim() === 'Alquiler' && a.fecha_fin_alquiler) {
           
           // Parseamos la fecha evitando desfases de zonas horarias UTC
@@ -120,7 +126,6 @@ export default function RootLayout({
           });
 
           const identificadorCaf = a.caf ? `[CAF: ${a.caf}] ` : '';
-          // 🛡️ Usamos el S/N (Service Tag) como identificador institucional seguro
           const textoActivoFinal = `${identificadorCaf}Equipo en Alquiler (S/N: ${a.serial_id || '—'})`;
 
           // Condición 1: Ya vencido
