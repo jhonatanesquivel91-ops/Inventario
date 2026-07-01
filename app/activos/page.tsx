@@ -69,6 +69,10 @@ export default function StockActivosPage() {
   const [formSpecs, setFormSpecs] = useState('');
   const [formCondicion, setFormCondicion] = useState('Excelente');
 
+  // 🆕 NUEVOS ESTADOS DE PROPIEDAD Y ADQUISICIÓN
+  const [formTipoPropiedad, setFormTipoPropiedad] = useState<'Compra' | 'Alquiler'>('Compra');
+  const [formFechaFinAlquiler, setFormFechaFinAlquiler] = useState('');
+
   const [condicionesCatalogo, setCondicionesCatalogo] = useState<any[]>([]);
 
   const [nuevoComentario, setNuevoComentario] = useState('');
@@ -81,28 +85,61 @@ export default function StockActivosPage() {
     setTimeout(() => setAlerta(null), 3500);
   };
 
+  // 🆕 HELPER PARA EVALUAR ALERTAS DE ALQUILER (10 DÍAS ANTES)
+  const evaluarAlertaAlquiler = (fechaFinStr: string) => {
+    if (!fechaFinStr) return { urgente: false, diasRestantes: null };
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    const fechaFin = new Date(fechaFinStr);
+    fechaFin.setHours(0, 0, 0, 0);
+
+    const diferenciaTiempo = fechaFin.getTime() - hoy.getTime();
+    const diasRestantes = Math.ceil(diferenciaTiempo / (1000 * 60 * 60 * 24));
+
+    // Alerta si faltan 10 días o menos, o si ya venció
+    return {
+      urgente: diasRestantes <= 10,
+      vencido: diasRestantes < 0,
+      diasRestantes
+    };
+  };
+
   const cargarDatos = async () => {
     try {
       setLoading(true);
 
-      // Traemos los activos y los estados de conservación en paralelo
-      const [rActivos, rCondiciones] = await Promise.all([
+      // 1. Consultamos la vista original y la tabla física en paralelo
+      const [rVista, rFisica, rCondiciones] = await Promise.all([
         supabase.from('vista_activos_completa').select('*').order('activo_id', { ascending: false }),
+        supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'), // 👈 Traemos los datos nuevos directo de la tabla física
         supabase.from('estados_conservacion').select('*').order('nombre_estado')
       ]);
 
-      if (rActivos.error) throw rActivos.error;
+      if (rVista.error) throw rVista.error;
+      if (rFisica.error) throw rFisica.error;
       if (rCondiciones.error) throw rCondiciones.error;
 
-      setActivos((rActivos.data || []).map(item => ({ ...item, id: item.activo_id })));
+      const datosVista = rVista.data || [];
+      const datosFisicos = rFisica.data || [];
+
+      // 2. 🔀 FUSIÓN SENIOR: Cruzamos la data de la vista con los atributos nuevos de la tabla física
+      const registrosCombinados = datosVista.map(item => {
+        const coincidenciaFisica = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
+        
+        return {
+          ...item,
+          id: item.activo_id,
+          // Inyectamos los valores reales de la tabla física
+          tipo_propiedad: coincidenciaFisica?.tipo_propiedad || 'Compra', 
+          fecha_fin_alquiler: coincidenciaFisica?.fecha_fin_alquiler || null
+        };
+      });
+
+      setActivos(registrosCombinados);
       setCondicionesCatalogo(rCondiciones.data || []);
 
-      // Inicializar el valor del formulario por defecto con el primer estado dinámico si existe
-      if (rCondiciones.data && rCondiciones.data.length > 0 && !formCondicion) {
-        setFormCondicion(rCondiciones.data[0].nombre_estado);
-      }
     } catch (err: any) {
-      lanzarAlerta(`❌ Error: ${err.message}`);
+      lanzarAlerta(`❌ Error de carga: ${err.message}`);
     } finally {
       setLoading(false);
     }
@@ -126,7 +163,6 @@ export default function StockActivosPage() {
     }
   }, [formMarca, formTipo, modalForm.modo]);
 
-  // --- FUNCIÓN EXACTA PARA DESCARGAR PLANTILLA MODELO ---
   const descargarPlantillaModelo = () => {
     const estructura = [{ 'Número de Serie': 'SNDEMO123', 'Tipo de Hardware': 'Laptop', 'Marca': 'Lenovo', 'Modelo': 'ThinkPad T14', 'Especificaciones': '16GB RAM', 'Código Patrimonial': 'CAF-01' }];
     const wb = XLSX.utils.book_new();
@@ -135,7 +171,6 @@ export default function StockActivosPage() {
     XLSX.writeFile(wb, "Plantilla_Importacion_TI.xlsx");
   };
 
-  // --- FUNCIÓN EXACTA PARA PROCESAR EL EXCEL MASIVO ---
   const manejarProcesarPlantillaExcel = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!archivoExcel) return;
@@ -168,7 +203,6 @@ export default function StockActivosPage() {
     } catch (err: any) { lanzarAlerta(`❌ Error: ${err.message}`); } finally { setGuardando(false); }
   };
 
-  // 📊 KPIS CON DISEÑO EXPERTO UI RESTAURADOS
   const metricasTI = useMemo(() => {
     return {
       total: activos.length,
@@ -178,7 +212,6 @@ export default function StockActivosPage() {
     };
   }, [activos]);
 
-  // Filtrado por Categoria de Activo
   const activosFiltrados = useMemo(() => {
     return activos.filter((item) => {
       const coincideCategoria = filtroCategoria === 'Todos' || item.categoria === filtroCategoria;
@@ -195,7 +228,6 @@ export default function StockActivosPage() {
     });
   }, [activos, busqueda, filtroCategoria]);
 
-  // Exportar con comentarios incluidos
   const ejecutarExportacionExcel = async () => {
     if (activosFiltrados.length === 0) return lanzarAlerta("⚠️ No hay datos para exportar.");
     try {
@@ -215,10 +247,14 @@ export default function StockActivosPage() {
           'Modelo': a.modelo,
           'Número de Serie': a.serial_id,
           'Código CAF': a.caf || 'N/A',
+          'Especificaciones Técnicas': a.especificaciones || 'Sin detalles', // 👈 ¡COLUMNA RESTAURADA AQUÍ!
+          'Régimen Propiedad': a.tipo_propiedad || 'Compra', 
+          'Vencimiento Alquiler': a.fecha_fin_alquiler ? new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE') : 'N/A', 
           'Condición Física': a.condicion || 'Excelente',
           'Estado Operativo': a.estado_actual,
           'Custodio Asignado': a.nombre_completo || 'Almacén Central TI',
-          'Fecha Registro': a.fecha_registro ? new Date(a.fecha_registro).toLocaleDateString('es-PE') : new Date().toLocaleDateString('es-PE')
+          'Fecha Registro': a.fecha_registro ? new Date(a.fecha_registro).toLocaleDateString('es-PE') : new Date().toLocaleDateString('es-PE'),
+          'Historial Comentarios': celdaComentarios
         };
       });
 
@@ -236,28 +272,34 @@ export default function StockActivosPage() {
 
   const abrirModalAlta = () => {
     setFormTipo('Laptop'); setFormSerie(''); setFormCaf(''); setFormSpecs(''); setFormCondicion('Excelente');
+    setFormTipoPropiedad('Compra'); setFormFechaFinAlquiler(''); // 🆕 Reset alta
     setModalForm({ open: true, modo: 'alta' });
   };
 
   const abrirModalEdicion = (item: any) => {
-  setFormTipo(item.categoria || 'Laptop'); 
-  setFormMarca(item.marca || ''); 
-  setFormModelo(item.modelo || '');
-  setFormSerie(item.serial_id || ''); 
-  setFormCaf(item.caf || ''); 
-  setFormSpecs(item.especificaciones || '');
-  // Carga dinámicamente el nombre de la condición que ya poseía el registro
-  setFormCondicion(item.nombre_estado || item.condicion || condicionesCatalogo[0]?.nombre_estado || 'Excelente');
-  setModalForm({ open: true, modo: 'edicion', activo: item });
-};
+    setFormTipo(item.categoria || 'Laptop');
+    setFormMarca(item.marca || '');
+    setFormModelo(item.modelo || '');
+    setFormSerie(item.serial_id || '');
+    setFormCaf(item.caf || '');
+    setFormSpecs(item.especificaciones || '');
+    setFormCondicion(item.nombre_estado || item.condicion || condicionesCatalogo[0]?.nombre_estado || 'Excelente');
+
+    // 🆕 CARGAR VALORES ADQUIRIDOS DE LA BD
+    setFormTipoPropiedad(item.tipo_propiedad === 'Alquiler' ? 'Alquiler' : 'Compra');
+    setFormFechaFinAlquiler(item.fecha_fin_alquiler || '');
+
+    setModalForm({ open: true, modo: 'edicion', activo: item });
+  };
 
   const manejarGuardarOActualizar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formSerie.trim()) return lanzarAlerta("La serie es requerida.");
+    if (formTipoPropiedad === 'Alquiler' && !formFechaFinAlquiler) return lanzarAlerta("Especifique la fecha de fin del alquiler.");
+    
     try {
       setGuardando(true);
       const hoy = new Date().toISOString();
-
       const estadoCalculado = modalForm.modo === 'alta' ? 'Disponible en Almacén TI' : modalForm.activo.estado_actual;
 
       const payload = {
@@ -271,24 +313,18 @@ export default function StockActivosPage() {
         p_estado_actual: estadoCalculado
       };
 
-      // 1. Guardamos la metadata técnica
+      // 1. Ejecuta tu RPC normal para mapear categorías/marcas/modelos internos
       const { data: idGenerado, error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
       if (rpcError) throw rpcError;
 
-      // 2. Buscamos el objeto de estado seleccionado en la interfaz
-      const objEstado = condicionesCatalogo.find(c => c.nombre_estado === formCondicion);
-
-      // 3. Si es un Alta Nueva, le damos un respiro de 150ms a Supabase para que el Trigger termine 
-      // de escribir la fila y no choque en memoria con el Update subsiguiente
       if (modalForm.modo === 'alta') {
         await new Promise(resolve => setTimeout(resolve, 150));
       }
 
-      // 4. Resolvemos el ID de forma 100% segura
+      // 2. Resolvemos el ID real del activo
       let idReal = modalForm.modo === 'alta' ? idGenerado : modalForm.activo.id;
 
-      // Si por alguna razón el RPC en alta no escupe el ID directo, lo rescatamos cruzando la serie única
-      if (!idReal && modalForm.modo === 'alta') {
+      if (!idReal) {
         const { data: activoRescatado } = await supabase
           .from('activos')
           .select('id')
@@ -297,15 +333,21 @@ export default function StockActivosPage() {
         if (activoRescatado) idReal = activoRescatado.id;
       }
 
+      // 3. 🛡️ SECCIÓN CORE: Forzamos la actualización de datos extendidos (Alta y Edición)
       if (idReal) {
+        const objEstado = condicionesCatalogo.find(c => c.nombre_estado === formCondicion);
+        
         const payloadExtendida: any = {
-          estado_conservacion_id: objEstado ? Number(objEstado.id) : null
+          estado_conservacion_id: objEstado ? Number(objEstado.id) : null,
+          tipo_propiedad: formTipoPropiedad,
+          fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler : null
         };
         
         if (modalForm.modo === 'alta') {
           payloadExtendida.fecha_registro = hoy;
         }
 
+        // Esta petición directo a la tabla inserta o sobreescribe Alquiler/Compra y la Fecha sin importar el RPC
         const { error: updateError } = await supabase
           .from('activos')
           .update(payloadExtendida)
@@ -315,14 +357,15 @@ export default function StockActivosPage() {
       }
 
       setModalForm({ open: false, modo: 'alta' });
-      lanzarAlerta("✅ Activo creado y condición física asignada con éxito.");
+      lanzarAlerta("✅ Activo sincronizado correctamente con sus parámetros de propiedad.");
       cargarDatos();
     } catch (err: any) { 
       lanzarAlerta(`❌ Error de sincronización: ${err.message}`); 
-    } finally { 
+    }  finally { 
       setGuardando(false); 
     }
   };
+
   const ejecutarBajaORestauracion = async () => {
     try {
       setGuardando(true);
@@ -382,7 +425,7 @@ export default function StockActivosPage() {
         <button onClick={ejecutarExportacionExcel} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase rounded-lg shadow transition-all">🖨️ Exportar Malla</button>
       </HeaderVista>
 
-      {/* KPIs RESTAURADOS Y MEJORADOS */}
+      {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 flex-shrink-0">
         <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Total Hardware</p><p className="text-base font-black text-slate-800 mt-1">{metricasTI.total} <span className="text-[9px] text-slate-400 font-medium">unidades</span></p></div>
         <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full" style={{ backgroundColor: 'rgb(1, 71, 118)' }}></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">En Custodia / Uso</p><p className="text-base font-black mt-1" style={{ color: 'rgb(1, 71, 118)' }}>{metricasTI.asignados} <span className="text-[9px] text-slate-400 font-medium">bienes</span></p></div>
@@ -401,7 +444,7 @@ export default function StockActivosPage() {
         </div>
       )}
 
-      {/* TABLA PRINCIPAL CON EMBEBIDOS TOTALMENTE ALINEADOS AL PIXEL */}
+      {/* TABLA PRINCIPAL */}
       <div className="flex-1 min-h-0 overflow-hidden bg-white rounded-xl border flex flex-col">
         <TablaControl tituloSeccion="Malla General de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} columnas={[
           {
@@ -431,24 +474,43 @@ export default function StockActivosPage() {
             )
           },
           {
-            header: "Fecha Registro",
-            field: "fecha_registro",
-            render: (a) => <span className="font-mono text-[10px] bg-slate-100 border px-1.5 py-0.5 rounded text-slate-600 font-bold">{a.fecha_registro ? new Date(a.fecha_registro).toLocaleDateString('es-PE') : new Date().toLocaleDateString('es-PE')}</span>
-          },
-          
-          {
-            header: "Condición",
-            field: "nombre_estado", 
+            // 🆕 COLUMNA DE ADQUISICIÓN / ALERTA DE VENCIMIENTO REESTRUCTURADA
+            header: "Régimen / Vencimiento",
+            field: "tipo_propiedad",
             render: (a) => {
-              // Ahora que la vista está corregida, los datos vienen directo del JOIN
-              const condNombre = a.nombre_estado; 
-              const colorHex = a.color_alerta || '#64748B'; // Usa el color alerta de la BD o gris de respaldo
+              const esAlquiler = a.tipo_propiedad === 'Alquiler';
+              const { urgente, vencido, diasRestantes } = evaluarAlertaAlquiler(a.fecha_fin_alquiler);
 
               return (
-                <span 
-                  className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider text-white border border-black/10 shadow-sm"
-                  style={{ backgroundColor: colorHex }}
-                >
+                <div className="space-y-1">
+                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${esAlquiler ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-slate-100 text-slate-700'
+                    }`}>
+                    {esAlquiler ? '💼 Alquiler' : '💼 Compra'}
+                  </span>
+
+                  {esAlquiler && a.fecha_fin_alquiler && (
+                    <div className="font-mono text-[10px] leading-none mt-1">
+                      <div className="text-slate-600 font-bold">{new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE')}</div>
+                      {urgente && (
+                        <div className={`text-[9px] font-black uppercase tracking-tight mt-0.5 animate-pulse ${vencido ? 'text-rose-600' : 'text-amber-600'
+                          }`}>
+                          {vencido ? `🚨 VENCIDO HACE ${Math.abs(diasRestantes!)} DÍAS` : `⏳ VENCE EN ${diasRestantes} DÍAS`}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+          },
+          {
+            header: "Condición",
+            field: "nombre_estado",
+            render: (a) => {
+              const condNombre = a.nombre_estado;
+              const colorHex = a.color_alerta || '#64748B';
+              return (
+                <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider text-white border border-black/10 shadow-sm" style={{ backgroundColor: colorHex }}>
                   {condNombre || 'Excelente'}
                 </span>
               );
@@ -482,15 +544,8 @@ export default function StockActivosPage() {
             }
           }
         ]}>
-          {/* 🛠️ SOLUCIÓN: LOGRADO EMBEBIDO DE FILTROS TOTALMENTE ALINEADOS CON EL BUSCADOR SIN SOBREPOSICIÓN */}
           <BuscadorControl value={busqueda} onChange={setBusqueda} placeholder="Buscar serie, modelo, CAF o custodio..." />
-
-          <FiltroSelect
-            value={filtroCategoria}
-            onChange={setFiltroCategoria}
-            options={[{ value: 'Todos', label: '📦 Todas las Familias' }, ...categoriasCatalogo.map(c => ({ value: c, label: c }))]}
-          />
-
+          <FiltroSelect value={filtroCategoria} onChange={setFiltroCategoria} options={[{ value: 'Todos', label: '📦 Todas las Familias' }, ...categoriasCatalogo.map(c => ({ value: c, label: c }))]} />
           <label className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-white px-3 h-[34px] border border-slate-200 rounded-xl cursor-pointer select-none shadow-sm hover:bg-slate-50 transition-all">
             <input type="checkbox" checked={activosFiltrados.length > 0 && seleccionados.length === activosFiltrados.length} onChange={(e) => manejarAlternarTodos(e.target.checked)} className="w-3.5 h-3.5 accent-slate-900 rounded" />
             <span>Marcar Todo</span>
@@ -498,7 +553,7 @@ export default function StockActivosPage() {
         </TablaControl>
       </div>
 
-      {/* --- FORMULARIO ALTA Y EDICIÓN EXTENDIDO AUTOMATIZADO --- */}
+      {/* MODAL FORMULARIO ALTA Y EDICIÓN EXTENDIDO */}
       <ModalBase isOpen={modalForm.open} onClose={() => setModalForm({ open: false, modo: 'alta' })} titulo={modalForm.modo === 'alta' ? "➕ Registrar Nuevo Activo" : "✏️ Modificar Parámetros de Activo"}>
         <form onSubmit={manejarGuardarOActualizar} className="space-y-4 text-xs font-medium text-slate-600">
           <div className="grid grid-cols-2 gap-3">
@@ -519,6 +574,7 @@ export default function StockActivosPage() {
                 {(ESTRUCTURA_HARDWARE[formTipo]?.[formMarca] || []).map((mod) => <option key={mod} value={mod}>{mod}</option>)}
               </select>
             ) : <input type="text" value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-slate-50" required />}</div>
+
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Número de Serie *</label>
               <input type="text" value={formSerie} onChange={(e) => setFormSerie(e.target.value)} placeholder="S/N único" className="w-full p-2 border rounded-lg outline-none font-mono font-bold text-slate-800 bg-white" required /></div>
@@ -526,28 +582,52 @@ export default function StockActivosPage() {
               <input type="text" value={formCaf} onChange={(e) => setFormCaf(e.target.value)} placeholder="Ej: CAF-021" className="w-full p-2 border rounded-lg outline-none font-mono font-bold text-slate-800" /></div>
           </div>
 
+          {/* 🆕 SECCIÓN DE TIPO DE PROPIEDAD E INPUT DINÁMICO */}
+          <div className="grid grid-cols-2 gap-3 bg-slate-50 p-2.5 border rounded-xl">
+            <div>
+              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Régimen Inmueble/Bien *</label>
+              <select
+                value={formTipoPropiedad}
+                onChange={(e) => setFormTipoPropiedad(e.target.value as 'Compra' | 'Alquiler')}
+                className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none"
+              >
+                <option value="Compra">💼 Compra</option>
+                <option value="Alquiler">💼 Alquiler</option>
+              </select>
+            </div>
+            <div>
+              <label className={`block font-bold uppercase text-[10px] mb-1 ${formTipoPropiedad === 'Alquiler' ? 'text-purple-600 font-black' : 'text-slate-400'}`}>
+                Fin de Contrato {formTipoPropiedad === 'Alquiler' && '*'}
+              </label>
+              <input
+                type="date"
+                value={formFechaFinAlquiler}
+                onChange={(e) => setFormFechaFinAlquiler(e.target.value)}
+                disabled={formTipoPropiedad === 'Compra'}
+                className={`w-full p-1.5 border rounded-lg outline-none font-mono font-bold text-xs ${formTipoPropiedad === 'Compra' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200' : 'bg-white text-purple-900 border-purple-300'
+                  }`}
+                required={formTipoPropiedad === 'Alquiler'}
+              />
+            </div>
+          </div>
+
           <div>
             <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Estado de Conservación Física</label>
-            <select
-              value={formCondicion}
-              onChange={(e) => setFormCondicion(e.target.value)}
-              className="w-full p-2 border border-slate-200 rounded-lg bg-white font-bold text-slate-700 outline-none text-xs shadow-sm"
-            >
-              {condicionesCatalogo.map((c) => (
-                <option key={c.id} value={c.nombre_estado}>
-                  {c.nombre_estado}
-                </option>
-              ))}
+            <select value={formCondicion} onChange={(e) => setFormCondicion(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg bg-white font-bold text-slate-700 outline-none text-xs shadow-sm">
+              {condicionesCatalogo.map((c) => (<option key={c.id} value={c.nombre_estado}>{c.nombre_estado}</option>))}
             </select>
           </div>
 
           <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Especificaciones Técnicas</label>
             <input type="text" value={formSpecs} onChange={(e) => setFormSpecs(e.target.value)} placeholder="Ej: Core i5, 16GB RAM, 512GB SSD" className="w-full p-2 border rounded-lg outline-none text-slate-800" /></div>
-          <button type="submit" disabled={guardando} style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider">{guardando ? "Sincronizando..." : "💾 Sincronizar Registro"}</button>
+
+          <button type="submit" disabled={guardando} style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider">
+            {guardando ? "Sincronizando..." : "💾 Sincronizar Registro"}
+          </button>
         </form>
       </ModalBase>
 
-      {/* --- MODAL INYECCIÓN EXCEL CON CONTEXTO COMPLETO --- */}
+      {/* --- MODAL EXCEL --- */}
       <ModalBase isOpen={modalExcel} onClose={() => setModalExcel(false)} titulo="📥 Carga Inteligente desde Archivos Excel" subtitulo="Inyección en lote masivo para el Almacén General de TI de la Universidad.">
         <div className="space-y-4">
           <div className="bg-slate-50 border p-3 rounded-xl flex items-center justify-between">
@@ -570,7 +650,7 @@ export default function StockActivosPage() {
         </div>
       </ModalBase>
 
-      {/* --- CONFIRMAR BAJA / RESTAURAR --- */}
+      {/* --- CONFIRMAR BAJA --- */}
       <ModalBase isOpen={modalConfirmarBaja.open} onClose={() => setModalConfirmarBaja({ open: false, id: null, masivo: false, restaurar: false })} titulo={modalConfirmarBaja.restaurar ? "🔄 ¿Restaurar Hardware Activo?" : "☣️ ¿Procesar Inactivación de Hardware?"}>
         <div className="text-center space-y-3">
           <p className="text-slate-500 text-[11px] leading-normal">{modalConfirmarBaja.restaurar ? "El equipo seleccionado volverá a estar operativo y disponible en el Almacén central de TI de forma inmediata." : "Los equipos seleccionados saldrán de la grilla activa y se enviarán al Depósito Histórico de Bajas TI."}</p>
@@ -593,22 +673,18 @@ export default function StockActivosPage() {
       </ModalBase>
 
       {/* --- BITÁCORA DE COMENTARIOS UNIFICADA --- */}
-<ModalBase 
-  isOpen={modalComments.open} 
-  onClose={() => setModalComments({ open: false, id: null, serie: '' })} 
-  titulo="💬 Historial de Observaciones de Hardware"
->
-  <BitacoraNotas 
-    numeroSerie={modalComments.serie}
-    tipoObs={tipoObs}
-    setTipoObs={setTipoObs}
-    nuevoComentario={nuevoComentario}
-    setNuevoComentario={setNuevoComentario}
-    enviandoComentario={false} // Si no usas cargando en esta hoja, puedes poner false
-    onGuardarComentario={guardarComentario}
-    listaComentarios={listaComentarios}
-  />
-</ModalBase>
+      <ModalBase isOpen={modalComments.open} onClose={() => setModalComments({ open: false, id: null, serie: '' })} titulo="💬 Historial de Observaciones de Hardware">
+        <BitacoraNotas
+          numeroSerie={modalComments.serie}
+          tipoObs={tipoObs}
+          setTipoObs={setTipoObs}
+          nuevoComentario={nuevoComentario}
+          setNuevoComentario={setNuevoComentario}
+          enviandoComentario={false}
+          onGuardarComentario={guardarComentario}
+          listaComentarios={listaComentarios}
+        />
+      </ModalBase>
     </div>
   );
 }

@@ -25,9 +25,9 @@ export default function ModuloPrestamos() {
   const [idActivo, setIdActivo] = useState<number | null>(null);
   const [txtActivo, setTxtActivo] = useState('');
   const [fechaEstimada, setFechaEstimada] = useState('');
-  const [alertaActiva, setAlertaActiva] = useState(true); 
+  const [alertaActiva, setAlertaActiva] = useState(true);
   const [observaciones, setObservaciones] = useState('');
-  
+
   // Orquestador de Alertas y Modals Dinámicos
   const [alerta, setAlerta] = useState<string | null>(null);
   const [modalSeguridad, setModalSeguridad] = useState<{
@@ -47,7 +47,7 @@ export default function ModuloPrestamos() {
       const [rPrest, rUsr, rAct] = await Promise.all([
         supabase.from('prestamos').select('*').order('estado_prestamo', { ascending: false }).order('id', { ascending: false }),
         supabase.from('usuarios').select('id, nombre_completo'),
-        supabase.from('vista_activos_completa').select('*') 
+        supabase.from('vista_activos_completa').select('*')
       ]);
 
       if (rPrest.data) setPrestamos(rPrest.data);
@@ -91,7 +91,10 @@ export default function ModuloPrestamos() {
   };
   const seleccionarActivoPredicho = (act: any) => {
     setIdActivo(act.activo_id || act.id);
-    setTxtActivo(`[${act.categoria}] ${act.marca} ${act.modelo} — S/N: ${act.serial_id}`);
+
+    // Formato exacto: Categoria : Marca Modelo — CAF: XXXX - S/N: XXXX
+    const cafTexto = act.caf ? ` — CAF: ${act.caf}` : '';
+    setTxtActivo(`${act.categoria || 'Equipo'} : ${act.marca || ''} ${act.modelo || ''}${cafTexto} - S/N: ${act.serial_id || 'N/R'}`);
   };
 
   const limpiarCampos = () => {
@@ -135,12 +138,12 @@ export default function ModuloPrestamos() {
         const { error } = await supabase.from('prestamos').update({ estado_prestamo: 'Devuelto', fecha_devolucion_real: new Date().toISOString() }).eq('id', targetId);
         if (error) throw error;
         lanzarAlerta("✅ Equipo recibido en almacén.");
-      } 
+      }
       else if (modalSeguridad.tipo === 'revertir') {
         const { error } = await supabase.from('prestamos').update({ estado_prestamo: 'Pendiente', fecha_devolucion_real: null }).eq('id', targetId);
         if (error) throw error;
         lanzarAlerta("🔄 Estado de retén revertido a Pendiente.");
-      } 
+      }
       else if (modalSeguridad.tipo === 'eliminar') {
         const { error } = await supabase.from('prestamos').delete().eq('id', targetId);
         if (error) throw error;
@@ -183,12 +186,31 @@ export default function ModuloPrestamos() {
     {
       header: "Activo de Retén Asignado",
       field: "nombre_activo",
-      render: (item: any) => (
-        <div className="max-w-xs">
-          <div className="font-medium text-slate-700 text-xs truncate">{item.nombre_activo}</div>
-          {item.observaciones && <div className="text-[10px] text-slate-400 italic mt-0.5">Destino: {item.observaciones}</div>}
-        </div>
-      )
+      render: (item: any) => {
+        // Buscamos el activo para obtener el CAF real de la base de datos
+        const activoVinculado = activosSistema.find(a => Number(a.activo_id || a.id) === Number(item.activo_id));
+        const cafDinamico = activoVinculado?.caf;
+        
+        let textoMostrar = item.nombre_activo || '';
+
+        // Si el registro no tiene la palabra "CAF" escrita pero sí tiene un CAF en la BD, lo acomodamos al formato
+        if (cafDinamico && !textoMostrar.includes('CAF:')) {
+          if (textoMostrar.includes('— S/N:')) {
+            textoMostrar = textoMostrar.replace('— S/N:', `— CAF: ${cafDinamico} - S/N:`);
+          } else if (textoMostrar.includes('- S/N:')) {
+            textoMostrar = textoMostrar.replace('- S/N:', `— CAF: ${cafDinamico} - S/N:`);
+          }
+        }
+
+        return (
+          <div className="max-w-xs">
+            <div className="font-medium text-slate-700 text-xs truncate">
+              {textoMostrar}
+            </div>
+            {item.observaciones && <div className="text-[10px] text-slate-400 italic mt-0.5">Destino: {item.observaciones}</div>}
+          </div>
+        );
+      }
     },
     {
       header: "Fechas Trazo",
@@ -245,7 +267,7 @@ export default function ModuloPrestamos() {
       <BuscadorControl value={busqueda} onChange={setBusqueda} placeholder="Buscar préstamo por prestatario, equipo asignado o estado..." />
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 overflow-hidden items-stretch">
-        
+
         <div className="lg:col-span-2 flex flex-col min-h-0 bg-white rounded-xl border overflow-hidden">
           <TablaControl tituloSeccion="Historial de Salidas Retén TI" badgeCount={datasetFiltrado.length} data={datasetFiltrado} loading={loading} columnas={columnasConfig} />
         </div>
@@ -273,8 +295,14 @@ export default function ModuloPrestamos() {
             <input type="text" value={txtActivo} onChange={(e) => { setTxtActivo(e.target.value); if (idActivo) setIdActivo(null); }} placeholder="Busca por S/N, Marca o Categoría..." className="w-full p-2 border border-slate-200 bg-white rounded-lg outline-none font-bold text-slate-800 text-xs shadow-inner" required />
             {txtActivo.trim() && !idActivo && activosSistema.filter(a => String(a.serial_id || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.marca || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.categoria || '').toLowerCase().includes(txtActivo.toLowerCase())).length > 0 && (
               <div className="absolute left-0 right-0 bg-white border rounded-lg max-h-28 overflow-y-auto z-50 mt-1 shadow-xl divide-y text-[11px]">
-                {activosSistema.filter(a => String(a.serial_id || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.marca || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.categoria || '').toLowerCase().includes(txtActivo.toLowerCase())).slice(0, 4).map(a => (
-                  <div key={a.activo_id || a.id} onClick={() => seleccionarActivoPredicho(a)} className="p-2 hover:bg-slate-50 cursor-pointer text-slate-700 font-bold">[{a.categoria}] {a.marca} — S/N: {a.serial_id}</div>
+                {activosSistema.filter(a => String(a.serial_id || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.marca || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.categoria || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.caf || '').toLowerCase().includes(txtActivo.toLowerCase())).slice(0, 4).map(a => (
+                  <div
+                    key={a.activo_id || a.id}
+                    onClick={() => seleccionarActivoPredicho(a)}
+                    className="p-2 hover:bg-slate-50 cursor-pointer text-slate-700 font-bold"
+                  >
+                    {a.categoria || 'Equipo'} : {a.marca || ''} {a.modelo || ''}{a.caf ? ` — CAF: ${a.caf}` : ''} - S/N: {a.serial_id || 'N/R'}
+                  </div>
                 ))}
               </div>
             )}
@@ -298,12 +326,12 @@ export default function ModuloPrestamos() {
       </div>
 
       {/* 🔐 MODAL DE CONFIRMACIÓN DE SEGURIDAD POLIMÓRFICO */}
-      <ModalBase 
-        isOpen={modalSeguridad.open} 
-        onClose={() => setModalSeguridad({ open: false, tipo: null, id: null })} 
+      <ModalBase
+        isOpen={modalSeguridad.open}
+        onClose={() => setModalSeguridad({ open: false, tipo: null, id: null })}
         titulo={
-          modalSeguridad.tipo === 'recibir' ? "📥 Confirmar Recepción de Hardware" : 
-          modalSeguridad.tipo === 'revertir' ? "🔄 Confirmar Reversión de Estado" : "⚠️ Eliminar Registro de Préstamo"
+          modalSeguridad.tipo === 'recibir' ? "📥 Confirmar Recepción de Hardware" :
+            modalSeguridad.tipo === 'revertir' ? "🔄 Confirmar Reversión de Estado" : "⚠️ Eliminar Registro de Préstamo"
         }
       >
         <div className="text-center space-y-3 font-medium text-xs">
@@ -314,10 +342,10 @@ export default function ModuloPrestamos() {
           </p>
           <div className="flex justify-center gap-2 pt-2 border-t">
             <button type="button" onClick={() => setModalSeguridad({ open: false, tipo: null, id: null })} className="px-3 py-1.5 bg-slate-100 rounded-lg font-bold text-slate-700">Cancelar</button>
-            <button 
-              type="button" 
-              onClick={procesarAccionSegura} 
-              disabled={guardando} 
+            <button
+              type="button"
+              onClick={procesarAccionSegura}
+              disabled={guardando}
               className={`px-3 py-1.5 text-white rounded-lg font-bold shadow-md ${modalSeguridad.tipo === 'eliminar' ? 'bg-red-600' : 'bg-blue-800'}`}
               style={modalSeguridad.tipo !== 'eliminar' ? { backgroundColor: 'rgb(1, 71, 118)' } : {}}
             >

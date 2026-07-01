@@ -5,8 +5,8 @@ import { supabase } from '../../lib/supabase';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
 import { BuscadorControl } from '@/components/BuscadorControl';
-import { ModalBase } from '@/components/ModalBase'; // 👈 Tu plantilla de modales corporativa
-import { PanelFormulario } from '@/components/PanelFormulario'; // 👈 Tu nueva plantilla de formulario derecho
+import { ModalBase } from '@/components/ModalBase';
+import { PanelFormulario } from '@/components/PanelFormulario';
 
 export default function GestionPersonalPage() {
   const [subTab, setSubTab] = useState<'colaboradores' | 'areas' | 'cargos'>('colaboradores');
@@ -24,6 +24,7 @@ export default function GestionPersonalPage() {
   const [formDni, setFormDni] = useState('');
   const [selectAreaId, setSelectAreaId] = useState('');
   const [selectCargoId, setSelectCargoId] = useState('');
+  const [formEstado, setFormEstado] = useState<'Activo' | 'Inactivo'>('Activo');
   const [colorHex, setColorHex] = useState('#114776');
 
   const [guardando, setGuardando] = useState(false);
@@ -57,7 +58,7 @@ export default function GestionPersonalPage() {
   useEffect(() => {
     cargarCatalogos();
     limpiarFormulario();
-    setBusqueda(''); 
+    setBusqueda('');
   }, [subTab]);
 
   const limpiarFormulario = () => {
@@ -66,6 +67,7 @@ export default function GestionPersonalPage() {
     setFormDni('');
     setSelectAreaId('');
     setSelectCargoId('');
+    setFormEstado('Activo'); // 👈 Resetea a Activo por defecto
     setColorHex('#114776');
   };
 
@@ -73,10 +75,11 @@ export default function GestionPersonalPage() {
   const datasetFiltrado = React.useMemo(() => {
     const termino = busqueda.toLowerCase().trim();
     if (subTab === 'colaboradores') {
-      return usuarios.filter(u => 
+      return usuarios.filter(u =>
         !termino ||
         String(u.nombre_completo || '').toLowerCase().includes(termino) ||
         String(u.dni || '').toLowerCase().includes(termino) ||
+        String(u.estado || '').toLowerCase().includes(termino) ||
         String(u.areas?.nombre_area || '').toLowerCase().includes(termino) ||
         String(u.cargos?.nombre_cargo || '').toLowerCase().includes(termino)
       );
@@ -116,6 +119,26 @@ export default function GestionPersonalPage() {
           )
         },
         {
+          header: "Estado Operativo",
+          field: "estado",
+          render: (u: any) => {
+            const esActivo = u.estado === 'Activo';
+            return (
+              <div className="space-y-0.5">
+                <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider ${esActivo ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' : 'bg-rose-100 text-rose-800 border border-rose-200'
+                  }`}>
+                  {esActivo ? '● Activo' : '○ Inactivo'}
+                </span>
+                {!esActivo && (
+                  <div className="text-[9px] text-rose-600 font-black tracking-tight uppercase animate-pulse">
+                    🚨 Custodia a TI
+                  </div>
+                )}
+              </div>
+            );
+          }
+        },
+        {
           header: "Acciones",
           className: "text-right w-20",
           render: (u: any) => (
@@ -131,8 +154,8 @@ export default function GestionPersonalPage() {
     if (subTab === 'areas') {
       return [
         { header: "Área Corporativa", field: "nombre_area", render: (a: any) => <span className="font-bold text-slate-800 text-xs">🏢 {a.nombre_area}</span> },
-        { 
-          header: "Identificador Visual", 
+        {
+          header: "Identificador Visual",
           field: "color_hex",
           render: (a: any) => (
             <div className="flex items-center gap-2 font-mono text-[10px] font-bold">
@@ -184,7 +207,8 @@ export default function GestionPersonalPage() {
           nombre_completo: formNombre.trim(),
           dni: formDni.trim(),
           area_id: selectAreaId ? Number(selectAreaId) : null,
-          cargo_id: selectCargoId ? Number(selectCargoId) : null
+          cargo_id: selectCargoId ? Number(selectCargoId) : null,
+          estado: formEstado // 👈 Inyección del estado real en Supabase
         };
       } else if (subTab === 'areas') {
         payload = { nombre_area: formNombre.trim(), color_hex: colorHex };
@@ -192,7 +216,7 @@ export default function GestionPersonalPage() {
         payload = { nombre_cargo: formNombre.trim() };
       }
 
-      const { error } = idEditando 
+      const { error } = idEditando
         ? await supabase.from(tablaDestino).update(payload).eq('id', idEditando)
         : await supabase.from(tablaDestino).insert([payload]);
 
@@ -213,7 +237,7 @@ export default function GestionPersonalPage() {
       setGuardando(true);
       const { error } = await supabase.from(modalEliminar.tabla).delete().eq('id', modalEliminar.id);
       if (error) throw new Error("Restricción: El elemento posee dependencias o activos tecnológicos asignados.");
-      
+
       setModalEliminar({ open: false, id: null, tabla: '' });
       lanzarAlerta("🗑️ Elemento removido físicamente.");
       limpiarFormulario();
@@ -232,6 +256,7 @@ export default function GestionPersonalPage() {
       setFormDni(item.dni || '');
       setSelectAreaId(item.area_id ? String(item.area_id) : '');
       setSelectCargoId(item.cargo_id ? String(item.cargo_id) : '');
+      setFormEstado(item.estado === 'Inactivo' ? 'Inactivo' : 'Activo'); // 👈 Mapeo de estado al editar
     } else if (subTab === 'areas') {
       setFormNombre(item.nombre_area);
       setColorHex(item.color_hex || '#114776');
@@ -244,8 +269,8 @@ export default function GestionPersonalPage() {
     <div className="h-[calc(100vh-80px)] flex flex-col justify-between space-y-3 font-sans overflow-hidden text-slate-700 animate-fade-in">
       {alerta && <div className="fixed top-4 right-4 z-50 px-4 py-2 bg-slate-900 text-white text-xs font-black rounded-xl shadow-2xl">{alerta}</div>}
 
-      <HeaderVista 
-        titulo="👥 Catálogo Maestro de Personal" 
+      <HeaderVista
+        titulo="👥 Catálogo Maestro de Personal"
         subtitulo="Administración estructural y fichas de Colaboradores, Áreas de Posgrado y Cargos Técnicos."
         badgeStatus="online"
       >
@@ -256,14 +281,14 @@ export default function GestionPersonalPage() {
         </div>
       </HeaderVista>
 
-      <BuscadorControl 
+      <BuscadorControl
         value={busqueda}
         onChange={setBusqueda}
         placeholder={`Buscar de forma rápida dentro de los registros de ${subTab}...`}
       />
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 overflow-hidden items-stretch">
-        
+
         {/* GRILLA DE LA TABLA (IZQUIERDA - 2/3) */}
         <div className="lg:col-span-2 flex flex-col min-h-0 bg-white rounded-xl border overflow-hidden">
           <TablaControl
@@ -272,11 +297,11 @@ export default function GestionPersonalPage() {
             data={datasetFiltrado}
             loading={loading}
             msgVacio="No se encontraron registros activos en la base de datos."
-            columnas={columnasConfig} 
+            columnas={columnasConfig}
           />
         </div>
 
-        {/* 🚀 CONSUMO DE LA PLANTILLA REUTILIZABLE CORE BOX (DERECHA - 1/3) */}
+        {/* FORMULARIO DE EDICIÓN / ALTA (DERECHA - 1/3) */}
         <PanelFormulario
           idEditando={idEditando}
           onCancelar={limpiarFormulario}
@@ -305,6 +330,21 @@ export default function GestionPersonalPage() {
                 <select value={selectCargoId} onChange={(e) => setSelectCargoId(e.target.value)} className="w-full p-2 border border-slate-200 bg-white rounded-lg font-bold text-slate-700 outline-none text-xs cursor-pointer shadow-sm" required>
                   <option value="">Seleccione un cargo...</option>
                   {cargos.map(c => <option key={c.id} value={c.id}>{c.nombre_cargo}</option>)}
+                </select>
+              </div>
+
+              {/* 🛡️ SELECTOR DE ESTADO OPERATIVO CORREGIDO */}
+              <div className="space-y-1 bg-slate-50 border p-2 rounded-xl animate-fade-in mt-2">
+                <label className="block font-bold text-slate-500 uppercase text-[10px]">Estado de Disponibilidad *</label>
+                <select
+                  value={formEstado}
+                  onChange={(e) => setFormEstado(e.target.value as 'Activo' | 'Inactivo')}
+                  className={`w-full p-2 border rounded-lg font-black outline-none text-xs cursor-pointer shadow-xs ${formEstado === 'Activo' ? 'bg-white text-emerald-700 border-slate-200' : 'bg-rose-50 text-rose-700 border-rose-300'
+                    }`}
+                  required
+                >
+                  <option value="Activo">🟢 Personal en Funciones (Activo)</option>
+                  <option value="Inactivo">🔴 Baja Laboral (Activos a Custodia TI)</option>
                 </select>
               </div>
             </>
@@ -342,7 +382,7 @@ export default function GestionPersonalPage() {
           <p className="text-slate-500 text-[11px] leading-normal">¿Estás seguro de destruir esta fila física de la base de datos de personal? Si el colaborador posee activos tecnológicos en custodia o el área tiene personal activo vinculado, la transacción se cancelará automáticamente por integridad.</p>
           <div className="flex justify-center gap-2 pt-2 border-t">
             <button type="button" onClick={() => setModalEliminar({ open: false, id: null, tabla: '' })} className="px-3 py-1.5 bg-slate-100 rounded-lg font-bold text-slate-700">Cancelar</button>
-            <button type="button" onClick={ejecutarEliminar} disabled={guardando} className="px-3 py-1.5 bg-red-600 text-white rounded-lg font-bold shadow-md>">Sí, Eliminar de Raíz</button>
+            <button type="button" onClick={ejecutarEliminar} disabled={guardando} className="px-3 py-1.5 bg-red-600 text-white rounded-lg font-bold shadow-md">Sí, Eliminar de Raíz</button>
           </div>
         </div>
       </ModalBase>

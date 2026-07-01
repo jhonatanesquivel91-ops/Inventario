@@ -23,123 +23,142 @@ export default function RootLayout({
 
   const isLoginPage = currentPath === '/login';
 
-  // Menú sin la página estática de alertas
   const menuItems = [
-    {
-      category: 'INVENTARIO',
+    { 
+      category: 'INVENTARIO', 
       items: [
         { name: '📦 Stock de Activos', path: '/activos' },
       ]
     },
-    {
-      category: 'OPERACIONES CUSTODIA',
+    { 
+      category: 'OPERACIONES CUSTODIA', 
       items: [
         { name: '📥 Asignación Express', path: '/asignaciones/alta' },
         { name: '🔄 Transferencias Espejo', path: '/asignaciones/traspaso' },
         { name: '📋 Préstamos Equipos', path: '/prestamos' },
       ]
     },
-    {
-      category: 'CONTROL',
+    { 
+      category: 'CONTROL', 
       items: [
         { name: '👥 Gestión de Personal', path: '/personal' },
         { name: '📊 Reportes de Oficina', path: '/reportes' },
-        { name: '📋 Historial / Logs', path: '/logs' },
-        { name: '🤖 Asistente IA', path: '/asistente-ia' },
         { name: '⚙️ Configuración Sistema', path: '/configuracion' },
       ]
     }
   ];
 
-  // 📡 Cargar Alertas Críticas y Préstamos Vencidos
   const cargarAlertasGlobales = async () => {
     try {
       const listaAlertas: any[] = [];
-      const hoy = new Date().toISOString();
-
-      // 1. Buscar Activos en Falla (Sintaxis CORREGIDA para el .or)
-      const { data: activosCriticos, error: errCriticos } = await supabase
-        .from('vista_activos_completa')
-        .select('*')
-        .or('nombre_estado.ilike.%falla%,nombre_estado.ilike.%mantenimiento%');
-
-      if (errCriticos) console.error("⚠️ Error en consulta de activos críticos:", errCriticos.message);
-
-      activosCriticos?.forEach(a => {
-        listaAlertas.push({
-          id: `activo-${a.activo_id}`,
-          tipo: 'critico',
-          icono: '⚠️',
-          titulo: `Estado Crítico: ${a.nombre_estado}`,
-          detalle: `${a.categoria} (${a.serial_id}) — Asignado a: ${a.nombre_completo || 'Almacén'}`
-        });
-      });
-
-      // 2. Buscar Préstamos Vencidos (Mapeo Inteligente Dinámico)
-      const { data: todosPrestamos, error: errPrestamos } = await supabase
-        .from('prestamos')
-        .select('*');
-
-      if (errPrestamos) console.error("⚠️ Error en consulta de préstamos:", errPrestamos.message);
-
       const ahora = new Date();
+      ahora.setHours(0, 0, 0, 0);
 
-      todosPrestamos?.forEach(p => {
-        // 🔍 Busca la columna que contenga la fecha límite de devolución
-        const claveFecha = Object.keys(p).find(key =>
-          key.toLowerCase().includes('fecha') &&
-          !key.toLowerCase().includes('real') &&
-          !key.toLowerCase().includes('entrega') &&
-          !key.toLowerCase().includes('registro')
-        ) || 'fecha_devolucion';
+      // 1. 🛡️ CONSULTA CORREGIDA: Quitamos "marca" y "modelo" que hacían romper la base de datos
+      const [resPrestamos, resActivos] = await Promise.all([
+        supabase.from('prestamos').select('*'),
+        supabase.from('activos').select('id, caf, tipo_propiedad, fecha_fin_alquiler, serial_id')
+      ]);
 
-        // 🔍 Busca la columna que tenga el nombre del usuario, personal o alumno
-        const claveUsuario = Object.keys(p).find(key =>
-          key.toLowerCase().includes('usuario') ||
-          key.toLowerCase().includes('nombre') ||
-          key.toLowerCase().includes('personal') ||
-          key.toLowerCase().includes('alumno') ||
-          key.toLowerCase().includes('custodio')
-        ) || 'usuario_nombre';
+      if (resPrestamos.error) console.error("⚠️ Error en préstamos:", resPrestamos.error.message);
+      if (resActivos.error) console.error("⚠️ Error en activos:", resActivos.error.message);
 
-        // 🔍 Busca la columna que tenga el número de serie o ID del activo
-        const claveSerial = Object.keys(p).find(key =>
-          key.toLowerCase().includes('serial') ||
-          key.toLowerCase().includes('serie') ||
-          key.toLowerCase().includes('activo_id') ||
-          key.toLowerCase().includes('codigo')
-        ) || 'serial_id';
+      const prestamos = resPrestamos.data || [];
+      const activos = resActivos.data || [];
 
-        const fechaLimiteRaw = p[claveFecha];
+      // ==========================================
+      // LÓGICA A: PROCESAR PRÉSTAMOS VENCIDOS
+      // ==========================================
+      prestamos.forEach(p => {
+        const estado = String(p.estado_prestamo || '').trim();
+        const tieneFechaEstimada = !!p.fecha_devolucion_estimada;
+        
+        if (estado === 'Pendiente' && tieneFechaEstimada) {
+          const fechaLimite = new Date(p.fecha_devolucion_estimada);
+          fechaLimite.setHours(0, 0, 0, 0);
 
-        // Condición para saber si ya fue devuelto (evita falsas alertas)
-        const yaDevuelto = p.fecha_entrega || p.fecha_devolucion_real || p.devuelto || p.estado === 'Devuelto' || p.estado_prestamo === 'Devuelto';
+          if (fechaLimite < ahora && p.alerta_activa !== false) {
+            const fechaFormateada = new Date(p.fecha_devolucion_estimada).toLocaleDateString('es-PE', {
+              day: '2-digit', month: '2-digit', year: 'numeric'
+            });
 
-        if (fechaLimiteRaw && !yaDevuelto) {
-          const fechaLimite = new Date(fechaLimiteRaw);
-
-          if (fechaLimite < ahora) {
-            // Extraemos los valores reales dinámicamente
-            const personaResponsable = p[claveUsuario] || 'Personal no identificado';
-            const identificadorSerie = p[claveSerial] || 'S/N no registrado';
+            const activoVinculado = activos.find(a => Number(a.id) === Number(p.activo_id));
+            const identificadorCaf = activoVinculado?.caf ? `[CAF: ${activoVinculado.caf}] ` : '';
+            const textoActivoFinal = `${identificadorCaf}${p.nombre_activo || 'Hardware de Retén'}`;
 
             listaAlertas.push({
-              id: `prestamo-${p.id || Math.random()}`,
+              id: `prestamo-${p.id}`,
               tipo: 'vencido',
+              ruta: '/prestamos',
               icono: '⏳',
               titulo: '⏰ Devolución Vencida',
-              detalle: `Activo S/N: ${identificadorSerie} — Retenido por: ${personaResponsable}`
+              detalle: `Responsable: ${p.nombre_prestatario || 'No asignado'}`,
+              activo: textoActivoFinal,
+              infoFecha: `Debió devolverse el: ${fechaFormateada}`,
+              esCritico: true
+            });
+          }
+        }
+      });
+
+      // ==========================================
+      // LÓGICA B: PROCESAR CONTRATOS DE ALQUILER (RENTING)
+      // ==========================================
+      activos.forEach(a => {
+        if (String(a.tipo_propiedad).trim() === 'Alquiler' && a.fecha_fin_alquiler) {
+          
+          // Parseamos la fecha evitando desfases de zonas horarias UTC
+          const partesFecha = a.fecha_fin_alquiler.split('-'); 
+          const fechaFin = new Date(Number(partesFecha[0]), Number(partesFecha[1]) - 1, Number(partesFecha[2]));
+          fechaFin.setHours(0, 0, 0, 0);
+
+          const difTiempo = fechaFin.getTime() - ahora.getTime();
+          const diasRestantes = Math.ceil(difTiempo / (1000 * 60 * 60 * 24));
+
+          const fechaFormateada = fechaFin.toLocaleDateString('es-PE', {
+            day: '2-digit', month: '2-digit', year: 'numeric'
+          });
+
+          const identificadorCaf = a.caf ? `[CAF: ${a.caf}] ` : '';
+          // 🛡️ Usamos el S/N (Service Tag) como identificador institucional seguro
+          const textoActivoFinal = `${identificadorCaf}Equipo en Alquiler (S/N: ${a.serial_id || '—'})`;
+
+          // Condición 1: Ya vencido
+          if (diasRestantes < 0) {
+            listaAlertas.push({
+              id: `alquiler-vencido-${a.id}`,
+              tipo: 'alquiler_vencido',
+              ruta: '/reportes',
+              icono: '🚨',
+              titulo: '❌ Contrato Renting Vencido',
+              detalle: `El contrato de arrendamiento caducó hace ${Math.abs(diasRestantes)} días.`,
+              activo: textoActivoFinal,
+              infoFecha: `Venció el: ${fechaFormateada}`,
+              esCritico: true
+            });
+          }
+          // Condición 2: Próximo a vencer (10 días o menos)
+          else if (diasRestantes <= 10) {
+            listaAlertas.push({
+              id: `alquiler-alerta-${a.id}`,
+              tipo: 'alquiler_alerta',
+              ruta: '/reportes',
+              icono: '📦',
+              titulo: '⚠️ Alquiler por Vencer',
+              detalle: `Contrato próximo a expirar en ${diasRestantes} días.`,
+              activo: textoActivoFinal,
+              infoFecha: `Fecha límite: ${fechaFormateada}`,
+              esCritico: false
             });
           }
         }
       });
 
       setNotificaciones(listaAlertas);
-    } catch (err: any) {
-      console.error("Error al compilar alertas del topbar:", err);
+    } catch (err) {
+      console.error("Error al procesar las alertas globales TI:", err);
     }
   };
-
   useEffect(() => {
     if (!isLoginPage) {
       cargarAlertasGlobales();
@@ -262,19 +281,34 @@ export default function RootLayout({
                       <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
                         {notificaciones.length > 0 ? (
                           notificaciones.map((n) => (
-                            <div key={n.id} className="p-3 hover:bg-slate-50/60 transition-all text-[11px] text-left">
+                            <div
+                              key={n.id}
+                              onClick={() => {
+                                router.push(n.ruta);
+                                setShowNotifMenu(false);
+                              }}
+                              className={`p-3 cursor-pointer transition-all text-[11px] text-left border-b border-slate-100 last:border-0 ${
+                                n.esCritico ? 'hover:bg-red-50/70' : 'hover:bg-amber-50/70'
+                              }`}
+                            >
                               <div className="flex gap-2 items-start">
                                 <span className="text-sm flex-shrink-0">{n.icono}</span>
-                                <div className="space-y-0.5">
-                                  <p className="font-bold text-slate-800">{n.titulo}</p>
-                                  <p className="text-slate-500 leading-normal">{n.detalle}</p>
+                                <div className="space-y-1 flex-1">
+                                  <p className={`font-make-bold font-bold ${n.esCritico ? 'text-red-700' : 'text-amber-700'}`}>{n.titulo}</p>
+                                  <p className="text-slate-700 font-medium leading-tight">
+                                    <strong>Activo:</strong> {n.activo} <br />
+                                    <span className="text-slate-500 font-normal">{n.detalle}</span>
+                                  </p>
+                                  <p className={`text-[10px] font-bold ${n.esCritico ? 'text-red-500' : 'text-amber-600'}`}>
+                                    🗓️ {n.infoFecha}
+                                  </p>
                                 </div>
                               </div>
                             </div>
                           ))
                         ) : (
                           <div className="p-6 text-center text-slate-400 font-medium text-[11px]">
-                            ✅ Sin novedades críticas pendientes.
+                            ✅ Sin incidencias ni contratos vencidos.
                           </div>
                         )}
                       </div>
