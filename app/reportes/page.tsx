@@ -273,8 +273,7 @@ export default function PaginaReportes() {
     currentY += (recLineas.length * 5) + 20;
     if (currentY > 260) { doc.addPage(); currentY = 40; }
     doc.line(60, currentY, 150, currentY);
-    doc.setFont("helvetica", "bold"); doc.text("Jhonatan Raul Esquivel Godoy", 78, currentY + 6);
-    doc.setFont("helvetica", "normal"); doc.text("Área de Soporte TI - Posgrado UPeU", 74, currentY + 11);
+    doc.setFont("helvetica", "bold"); doc.text("Área de Soporte TI - Posgrado UPeU", 78, currentY + 6);
 
     doc.save(`INFORME_TI_${act.serial_id}.pdf`);
     setModalInforme({ open: false, activo: null });
