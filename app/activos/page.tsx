@@ -45,7 +45,9 @@ export default function StockActivosPage() {
 
   // Estados de datos
   const [activos, setActivos] = useState<any[]>([]);
-  const [categoriasCatalogo] = useState<string[]>(Object.keys(ESTRUCTURA_HARDWARE));
+  const [categoriasCatalogo, setCategoriasCatalogo] = useState<any[]>([]);
+  const [marcasCatalogo, setMarcasCatalogo] = useState<any[]>([]); // 👈 NUEVO
+  const [modelosCatalogo, setModelosCatalogo] = useState<any[]>([]); // 👈 NUEVO
   const [listaComentarios, setListaComentarios] = useState<any[]>([]);
 
   // Filtros
@@ -108,11 +110,14 @@ export default function StockActivosPage() {
     try {
       setLoading(true);
 
-      // 1. Consultamos la vista original y la tabla física en paralelo
-      const [rVista, rFisica, rCondiciones] = await Promise.all([
+      // Consultamos todas las tablas maestras de golpe
+      const [rVista, rFisica, rCondiciones, rCategorias, rMarcas, rModelos] = await Promise.all([
         supabase.from('vista_activos_completa').select('*').order('activo_id', { ascending: false }),
-        supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'), // 👈 Traemos los datos nuevos directo de la tabla física
-        supabase.from('estados_conservacion').select('*').order('nombre_estado')
+        supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'),
+        supabase.from('estados_conservacion').select('*').order('nombre_estado'),
+        supabase.from('categorias_activo').select('*').order('nombre_categoria'), // 👈 CAMBIADO de 'nombre_categoria' a '*'
+        supabase.from('marcas').select('*').order('nombre_marca'), // 👈 Trae marcas físicas
+        supabase.from('modelos').select('*').order('nombre_modelo') // 👈 Trae modelos físicos
       ]);
 
       if (rVista.error) throw rVista.error;
@@ -122,14 +127,12 @@ export default function StockActivosPage() {
       const datosVista = rVista.data || [];
       const datosFisicos = rFisica.data || [];
 
-      // 2. 🔀 FUSIÓN SENIOR: Cruzamos la data de la vista con los atributos nuevos de la tabla física
+      // Fusión de datos extendidos
       const registrosCombinados = datosVista.map(item => {
         const coincidenciaFisica = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
-
         return {
           ...item,
           id: item.activo_id,
-          // Inyectamos los valores reales de la tabla física
           tipo_propiedad: coincidenciaFisica?.tipo_propiedad || 'Compra',
           fecha_fin_alquiler: coincidenciaFisica?.fecha_fin_alquiler || null
         };
@@ -138,12 +141,24 @@ export default function StockActivosPage() {
       setActivos(registrosCombinados);
       setCondicionesCatalogo(rCondiciones.data || []);
 
+      // Llenamos los estados con data directa del servidor
+      if (rCategorias.data) {
+        setCategoriasCatalogo(rCategorias.data); // 👈 Asegúrate de pasarle el arreglo completo, NO el .map() de texto plano anterior
+      } // 👈 Guardamos el objeto completo { id, nombre_categoria }
+      if (rMarcas.data) setMarcasCatalogo(rMarcas.data);
+      if (rModelos.data) setModelosCatalogo(rModelos.data);
+
     } catch (err: any) {
       lanzarAlerta(`❌ Error de carga: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    cargarDatos();
+  }, []);
+  // 💡 Nota: Los dos useEffect viejos que monitoreaban formTipo y formMarca se eliminaron para que no limpien tu formulario.
 
   useEffect(() => {
     cargarDatos();
@@ -229,6 +244,45 @@ export default function StockActivosPage() {
       );
     });
   }, [activos, busqueda, filtroCategoria]);
+
+  // 1. FILTRO REAL: Familia Hardware ➡️ Fabricante (Marca)
+  const marcasFiltradasBD = useMemo(() => {
+    if (!formTipo) return [];
+
+    // Buscamos el objeto de la categoría que coincide con el texto seleccionado en el formulario
+    const categoriaSeleccionadaObj = categoriasCatalogo.find(
+      cat => String(cat.nombre_categoria).toLowerCase().trim() === formTipo.toLowerCase().trim()
+    );
+    
+    if (!categoriaSeleccionadaObj) return [];
+
+    // Filtramos las marcas cuyo categoria_id coincida exactamente con el id real de la categoría
+    const filtradas = marcasCatalogo
+      .filter(m => Number(m.categoria_id) === Number(categoriaSeleccionadaObj.id))
+      .map(m => m.nombre_marca);
+
+    return Array.from(new Set(filtradas)).sort();
+  }, [marcasCatalogo, categoriasCatalogo, formTipo]);
+
+  // 2. FILTRO REAL: Fabricante (Marca) ➡️ Modelo Técnico
+  const modelosFiltradosBD = useMemo(() => {
+    if (!formMarca) return [];
+
+    // Buscamos el objeto de la marca que coincide con el fabricante seleccionado en el formulario
+    const marcaSeleccionadaObj = marcasCatalogo.find(
+      m => String(m.nombre_marca).toLowerCase().trim() === formMarca.toLowerCase().trim()
+    );
+    
+    if (!marcaSeleccionadaObj) return [];
+    
+    // Filtramos los modelos cuyo marca_id coincida con el id real de la marca
+    const filtrados = modelosCatalogo
+      .filter(mod => Number(mod.marca_id) === Number(marcaSeleccionadaObj.id))
+      .map(mod => mod.nombre_modelo);
+
+    return Array.from(new Set(filtrados)).sort();
+  }, [modelosCatalogo, marcasCatalogo, formMarca]);
+
 
   const ejecutarExportacionExcel = async () => {
     if (activosFiltrados.length === 0) return lanzarAlerta("⚠️ No hay datos para exportar.");
@@ -589,7 +643,7 @@ export default function StockActivosPage() {
           }
         ]}>
           <BuscadorControl value={busqueda} onChange={setBusqueda} placeholder="Buscar serie, modelo, CAF o custodio..." />
-          <FiltroSelect value={filtroCategoria} onChange={setFiltroCategoria} options={[{ value: 'Todos', label: '📦 Todas las Familias' }, ...categoriasCatalogo.map(c => ({ value: c, label: c }))]} />
+          <FiltroSelect value={filtroCategoria} onChange={setFiltroCategoria} options={[{ value: 'Todos', label: '📦 Todas las Familias' }, ...categoriasCatalogo.map(c => ({ value: c.nombre_categoria, label: c.nombre_categoria }))]} />
           <label className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-white px-3 h-[34px] border border-slate-200 rounded-xl cursor-pointer select-none shadow-sm hover:bg-slate-50 transition-all">
             <input type="checkbox" checked={activosFiltrados.length > 0 && seleccionados.length === activosFiltrados.length} onChange={(e) => manejarAlternarTodos(e.target.checked)} className="w-3.5 h-3.5 accent-slate-900 rounded" />
             <span>Marcar Todo</span>
@@ -603,39 +657,52 @@ export default function StockActivosPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Familia Hardware *</label>
-              <select value={formTipo} onChange={(e) => setFormTipo(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
-                {categoriasCatalogo.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
+              <select
+                value={formTipo}
+                onChange={(e) => setFormTipo(e.target.value)}
+                className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
+                required
+              >
+                <option value="">Seleccione una familia...</option>
+                {categoriasCatalogo.map((cat, index) => (
+                  <option key={`${cat.id || index}`} value={cat.nombre_categoria}>{cat.nombre_categoria}</option>
+                ))}
               </select>
             </div>
             <div>
-              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Fabricante *</label>
-              {modalForm.modo === 'alta' ? (
-                <select value={formMarca} onChange={(e) => setFormMarca(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
-                  {Object.keys(ESTRUCTURA_HARDWARE[formTipo] || {}).map(m => <option key={m} value={m}>{m}</option>)}
-                </select>
-              ) : (
-                <input type="text" value={formMarca} onChange={(e) => setFormMarca(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-white border-slate-200 shadow-inner" required />
-              )}
+              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Fabricante (Marca) *</label>
+              <select
+                value={formMarca}
+                onChange={(e) => setFormMarca(e.target.value)}
+                className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
+                required
+              >
+                <option value="">Seleccione una marca...</option>
+                {marcasFiltradasBD.map(m => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
             </div>
           </div>
 
           <div>
             <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Modelo Técnico *</label>
-            {modalForm.modo === 'alta' ? (
-              <select value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
-                {(ESTRUCTURA_HARDWARE[formTipo]?.[formMarca] || []).map((mod) => <option key={mod} value={mod}>{mod}</option>)}
-              </select>
-            ) : (
-              <input type="text" value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-white border-slate-200 shadow-inner" required />
-            )}
+            <select
+              value={formModelo}
+              onChange={(e) => setFormModelo(e.target.value)}
+              className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
+              required
+            >
+              <option value="">Seleccione un modelo...</option>
+              {modelosFiltradosBD.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+              {/* 💡 Salvavidas: Si la marca no tiene modelos en la BD, te da una opción vacía para no bloquear el formulario */}
+              {modelosFiltradosBD.length === 0 && formMarca && (
+                <option value="Estándar">Estándar / Por Defecto</option>
+              )}
+            </select>
           </div>
-          <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Modelo Técnico *</label>
-            {modalForm.modo === 'alta' ? (
-              <select value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
-                {(ESTRUCTURA_HARDWARE[formTipo]?.[formMarca] || []).map((mod) => <option key={mod} value={mod}>{mod}</option>)}
-              </select>
-            ) : <input type="text" value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-slate-50" required />}</div>
-
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Número de Serie *</label>
               <input type="text" value={formSerie} onChange={(e) => setFormSerie(e.target.value)} placeholder="S/N único" className="w-full p-2 border rounded-lg outline-none font-mono font-bold text-slate-800 bg-white" required /></div>
