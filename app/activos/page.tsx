@@ -150,18 +150,20 @@ export default function StockActivosPage() {
   }, []);
 
   useEffect(() => {
-    if (modalForm.modo === 'alta') {
+    // SOLO autoselecciona la primera marca si estamos registrando un alta nueva
+    if (modalForm.open && modalForm.modo === 'alta') {
       const marcas = Object.keys(ESTRUCTURA_HARDWARE[formTipo] || {});
       setFormMarca(marcas[0] || '');
     }
-  }, [formTipo, modalForm.modo]);
+  }, [formTipo, modalForm.modo, modalForm.open]);
 
   useEffect(() => {
-    if (modalForm.modo === 'alta') {
+    // SOLO autoselecciona el primer modelo si estamos registrando un alta nueva
+    if (modalForm.open && modalForm.modo === 'alta') {
       const models = ESTRUCTURA_HARDWARE[formTipo]?.[formMarca] || [];
       setFormModelo(models[0] || '');
     }
-  }, [formMarca, formTipo, modalForm.modo]);
+  }, [formMarca, formTipo, modalForm.modo, modalForm.open]);
 
   const descargarPlantillaModelo = () => {
     const estructura = [{ 'Número de Serie': 'SNDEMO123', 'Tipo de Hardware': 'Laptop', 'Marca': 'Lenovo', 'Modelo': 'ThinkPad T14', 'Especificaciones': '16GB RAM', 'Código Patrimonial': 'CAF-01' }];
@@ -599,16 +601,33 @@ export default function StockActivosPage() {
       <ModalBase isOpen={modalForm.open} onClose={() => setModalForm({ open: false, modo: 'alta' })} titulo={modalForm.modo === 'alta' ? "➕ Registrar Nuevo Activo" : "✏️ Modificar Parámetros de Activo"}>
         <form onSubmit={manejarGuardarOActualizar} className="space-y-4 text-xs font-medium text-slate-600">
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Familia Hardware *</label>
+            <div>
+              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Familia Hardware *</label>
               <select value={formTipo} onChange={(e) => setFormTipo(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
                 {categoriasCatalogo.map((cat) => <option key={cat} value={cat}>{cat}</option>)}
-              </select></div>
-            <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Fabricante *</label>
+              </select>
+            </div>
+            <div>
+              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Fabricante *</label>
               {modalForm.modo === 'alta' ? (
                 <select value={formMarca} onChange={(e) => setFormMarca(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
                   {Object.keys(ESTRUCTURA_HARDWARE[formTipo] || {}).map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
-              ) : <input type="text" value={formMarca} onChange={(e) => setFormMarca(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-slate-50" required />}</div>
+              ) : (
+                <input type="text" value={formMarca} onChange={(e) => setFormMarca(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-white border-slate-200 shadow-inner" required />
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Modelo Técnico *</label>
+            {modalForm.modo === 'alta' ? (
+              <select value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
+                {(ESTRUCTURA_HARDWARE[formTipo]?.[formMarca] || []).map((mod) => <option key={mod} value={mod}>{mod}</option>)}
+              </select>
+            ) : (
+              <input type="text" value={formModelo} onChange={(e) => setFormModelo(e.target.value)} className="w-full p-2 border rounded-lg outline-none font-bold text-slate-800 bg-white border-slate-200 shadow-inner" required />
+            )}
           </div>
           <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Modelo Técnico *</label>
             {modalForm.modo === 'alta' ? (
