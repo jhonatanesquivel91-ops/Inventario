@@ -8,6 +8,7 @@ import { BuscadorControl } from '@/components/BuscadorControl';
 import { FiltroSelect } from '@/components/FiltroSelect';
 import { ModalBase } from '@/components/ModalBase';
 import { BitacoraNotas } from '@/components/BitacoraNotas';
+import { ModalFormularioActivo } from '@/components/ModalFormularioActivo';
 import * as XLSX from 'xlsx';
 
 const ESTRUCTURA_HARDWARE: Record<string, Record<string, string[]>> = {
@@ -259,14 +260,12 @@ export default function StockActivosPage() {
   const marcasFiltradasBD = useMemo(() => {
     if (!formTipo) return [];
 
-    // Buscamos el objeto de la categoría que coincide con el texto seleccionado en el formulario
     const categoriaSeleccionadaObj = categoriasCatalogo.find(
       cat => String(cat.nombre_categoria).toLowerCase().trim() === formTipo.toLowerCase().trim()
     );
-    
+
     if (!categoriaSeleccionadaObj) return [];
 
-    // Filtramos las marcas cuyo categoria_id coincida exactamente con el id real de la categoría
     const filtradas = marcasCatalogo
       .filter(m => Number(m.categoria_id) === Number(categoriaSeleccionadaObj.id))
       .map(m => m.nombre_marca);
@@ -274,26 +273,30 @@ export default function StockActivosPage() {
     return Array.from(new Set(filtradas)).sort();
   }, [marcasCatalogo, categoriasCatalogo, formTipo]);
 
-  // 2. FILTRO REAL: Fabricante (Marca) ➡️ Modelo Técnico
+  // 2. FILTRO REAL CORREGIDO: Filtra los modelos cruzando Marca Y el ID de la Familia seleccionada
   const modelosFiltradosBD = useMemo(() => {
-    if (!formMarca) return [];
+    if (!formMarca || !formTipo) return [];
 
-    // Buscamos el objeto de la marca que coincide con el fabricante seleccionado en el formulario
-    const marcaSeleccionadaObj = marcasCatalogo.find(
-      m => String(m.nombre_marca).toLowerCase().trim() === formMarca.toLowerCase().trim()
+    // Buscamos el ID de la familia actual
+    const categoriaSeleccionadaObj = categoriasCatalogo.find(
+      cat => String(cat.nombre_categoria).toLowerCase().trim() === formTipo.toLowerCase().trim()
     );
-    
+    if (!categoriaSeleccionadaObj) return [];
+
+    // Buscamos la marca que coincide con el nombre Y que además pertenece a la familia seleccionada (Solución para Samsung Celular vs Monitor)
+    const marcaSeleccionadaObj = marcasCatalogo.find(
+      m => String(m.nombre_marca).toLowerCase().trim() === formMarca.toLowerCase().trim() &&
+        Number(m.categoria_id) === Number(categoriaSeleccionadaObj.id)
+    );
+
     if (!marcaSeleccionadaObj) return [];
-    
-    // Filtramos los modelos cuyo marca_id coincida con el id real de la marca
+
     const filtrados = modelosCatalogo
       .filter(mod => Number(mod.marca_id) === Number(marcaSeleccionadaObj.id))
       .map(mod => mod.nombre_modelo);
 
     return Array.from(new Set(filtrados)).sort();
-  }, [modelosCatalogo, marcasCatalogo, formMarca]);
-
-
+  }, [modelosCatalogo, marcasCatalogo, formMarca, formTipo, categoriasCatalogo]);
   const ejecutarExportacionExcel = async () => {
     if (activosFiltrados.length === 0) return lanzarAlerta("⚠️ No hay datos para exportar.");
     try {
@@ -364,7 +367,7 @@ export default function StockActivosPage() {
 
   const manejarGuardarOActualizar = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Resolvemos los textos finales que se enviarán a la base de datos
     let categoriaFinal = creandoNuevaFamilia ? nuevaFamiliaNombre.trim() : formTipo.trim();
     let marcaFinal = creandoNuevaMarca ? nuevaMarcaNombre.trim() : formMarca.trim();
@@ -379,7 +382,7 @@ export default function StockActivosPage() {
       setGuardando(true);
 
       // --- INYECCIÓN EN CASCADA INTELIGENTE DIRECTO EN LAS TABLAS ---
-      
+
       // 1. Si creó una familia nueva, la insertamos primero en categorias_activo
       if (creandoNuevaFamilia) {
         const { data: catInsertada, error: errCat } = await supabase
@@ -423,7 +426,7 @@ export default function StockActivosPage() {
       // --- ENVIAR AL RPC ORIGINAL ---
       // Tu RPC se ejecutará normalmente usando las cadenas de texto finales limpias
       const estadoCalculado = modalForm.modo === 'alta' ? 'Disponible en Almacén TI' : modalForm.activo.estado_actual;
-      
+
       const payload = {
         p_id: modalForm.modo === 'alta' ? null : modalForm.activo.id,
         p_serial_id: formSerie.trim(),
@@ -444,12 +447,17 @@ export default function StockActivosPage() {
       setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
       setCreandoNuevaMarca(false); setNuevaMarcaNombre('');
       setCreandoNuevoModelo(false); setNuevoModeloNombre('');
-      
+
       setModalForm({ open: false, modo: 'alta' });
       lanzarAlerta("✅ Activo y nuevos parámetros registrados en cascada correctamente.");
       cargarDatos();
     } catch (err: any) {
-      lanzarAlerta(`❌ Error al guardar parámetros: ${err.message}`);
+      // Validamos si el error es por duplicado de Clave Única en el Número de Serie
+      if (err.message?.includes('activos_serial_id_key') || err.details?.includes('already exists')) {
+        lanzarAlerta(`⚠️ El número de serie "${formSerie.trim()}" ya está registrado en el sistema. Ingrese uno diferente.`);
+      } else {
+        lanzarAlerta(`❌ Error al guardar parámetros: ${err.message}`);
+      }
     } finally {
       setGuardando(false);
     }
@@ -506,7 +514,7 @@ export default function StockActivosPage() {
 
   return (
     <div className="h-[calc(100vh-80px)] flex flex-col justify-between space-y-4 font-sans overflow-hidden text-slate-700 bg-slate-50/40 p-1">
-      {alerta && <div className="fixed top-4 right-4 z-50 px-4 py-2 bg-slate-900 text-white text-xs font-black rounded-xl shadow-2xl">{alerta}</div>}
+      {alerta && <div className="fixed top-4 right-4 z-[100] px-4 py-2 bg-slate-900 text-white text-xs font-black rounded-xl shadow-2xl">{alerta}</div>}
 
       <HeaderVista titulo="📦 Almacén de Activos TI" subtitulo="Control físico general, bitácoras de fallas técnicas e inyección masiva." badgeStatus="online">
         <button onClick={abrirModalAlta} className="px-3 py-1.5 text-white text-[11px] font-black uppercase rounded-lg shadow transition-all bg-blue-800" style={{ backgroundColor: 'rgb(1, 71, 118)' }}>➕ Nuevo Activo</button>
@@ -685,170 +693,33 @@ export default function StockActivosPage() {
       </div>
 
       {/* MODAL FORMULARIO ALTA Y EDICIÓN EXTENDIDO */}
-      <ModalBase isOpen={modalForm.open} onClose={() => setModalForm({ open: false, modo: 'alta' })} titulo={modalForm.modo === 'alta' ? "➕ Registrar Nuevo Activo" : "✏️ Modificar Parámetros de Activo"}>
-        <form onSubmit={manejarGuardarOActualizar} className="space-y-4 text-xs font-medium text-slate-600">
-          <div className="grid grid-cols-2 gap-3">
-            {/* 1. SELECTOR FAMILIA */}
-            <div>
-              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Familia Hardware *</label>
-              <select 
-                value={creandoNuevaFamilia ? 'NUEVA_FAMILIA' : formTipo} 
-                onChange={(e) => {
-                  if (e.target.value === 'NUEVA_FAMILIA') {
-                    setCreandoNuevaFamilia(true);
-                    setFormTipo('');
-                  } else {
-                    setCreandoNuevaFamilia(false);
-                    setFormTipo(e.target.value);
-                  }
-                }} 
-                className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
-                required={!creandoNuevaFamilia}
-              >
-                <option value="">Seleccione una familia...</option>
-                {categoriasCatalogo.map((cat, index) => (
-                  <option key={`${cat.id || index}`} value={cat.nombre_categoria}>{cat.nombre_categoria}</option>
-                ))}
-                <option value="NUEVA_FAMILIA" className="text-blue-700 font-bold">➕ Agregar nueva familia...</option>
-              </select>
-
-              {creandoNuevaFamilia && (
-                <input 
-                  type="text" 
-                  value={nuevaFamiliaNombre} 
-                  onChange={(e) => setNuevaFamiliaNombre(e.target.value)} 
-                  placeholder="Escribe la nueva familia..." 
-                  className="w-full mt-1.5 p-1.5 border border-blue-300 rounded-lg outline-none font-bold text-slate-800 bg-blue-50/30 text-xs animate-fade-in"
-                  required 
-                />
-              )}
-            </div>
-            {/* 2. SELECTOR FABRICANTE / MARCA */}
-            <div>
-              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Fabricante (Marca) *</label>
-              <select 
-                value={creandoNuevaMarca ? 'NUEVA_MARCA' : formMarca} 
-                onChange={(e) => {
-                  if (e.target.value === 'NUEVA_MARCA') {
-                    setCreandoNuevaMarca(true);
-                    setFormMarca('');
-                  } else {
-                    setCreandoNuevaMarca(false);
-                    setFormMarca(e.target.value);
-                  }
-                }} 
-                className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
-                required={!creandoNuevaMarca}
-                disabled={!formTipo && !creandoNuevaFamilia}
-              >
-                <option value="">Seleccione una marca...</option>
-                {marcasFiltradasBD.map(m => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-                <option value="NUEVA_MARCA" className="text-blue-700 font-bold">➕ Agregar nueva marca...</option>
-              </select>
-
-              {creandoNuevaMarca && (
-                <input 
-                  type="text" 
-                  value={nuevaMarcaNombre} 
-                  onChange={(e) => setNuevaMarcaNombre(e.target.value)} 
-                  placeholder="Escribe la nueva marca..." 
-                  className="w-full mt-1.5 p-1.5 border border-blue-300 rounded-lg outline-none font-bold text-slate-800 bg-blue-50/30 text-xs animate-fade-in"
-                  required 
-                />
-              )}
-            </div>
-          </div>
-         
-
-          {/* 3. SELECTOR MODELO */}
-          <div>
-            <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Modelo Técnico *</label>
-            <select 
-              value={creandoNuevoModelo ? 'NUEVO_MODELO' : formModelo} 
-              onChange={(e) => {
-                if (e.target.value === 'NUEVO_MODELO') {
-                  setCreandoNuevoModelo(true);
-                  setFormModelo('');
-                } else {
-                  setCreandoNuevoModelo(false);
-                  setFormModelo(e.target.value);
-                }
-              }} 
-              className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
-              required={!creandoNuevoModelo}
-              disabled={!formMarca && !creandoNuevaMarca}
-            >
-              <option value="">Seleccione un modelo...</option>
-              {modelosFiltradosBD.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-              <option value="NUEVO_MODELO" className="text-blue-700 font-bold">➕ Agregar nuevo modelo...</option>
-            </select>
-
-            {creandoNuevoModelo && (
-              <input 
-                type="text" 
-                value={nuevoModeloNombre} 
-                onChange={(e) => setNuevoModeloNombre(e.target.value)} 
-                placeholder="Escribe el nuevo modelo técnico..." 
-                className="w-full mt-1.5 p-2 border border-blue-300 rounded-lg outline-none font-bold text-slate-800 bg-blue-50/30 text-xs animate-fade-in"
-                required 
-              />
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Número de Serie *</label>
-              <input type="text" value={formSerie} onChange={(e) => setFormSerie(e.target.value)} placeholder="S/N único" className="w-full p-2 border rounded-lg outline-none font-mono font-bold text-slate-800 bg-white" required /></div>
-            <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Código CAF</label>
-              <input type="text" value={formCaf} onChange={(e) => setFormCaf(e.target.value)} placeholder="Ej: CAF-021" className="w-full p-2 border rounded-lg outline-none font-mono font-bold text-slate-800" /></div>
-          </div>
-
-          {/* 🆕 SECCIÓN DE TIPO DE PROPIEDAD E INPUT DINÁMICO */}
-          <div className="grid grid-cols-2 gap-3 bg-slate-50 p-2.5 border rounded-xl">
-            <div>
-              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Régimen Inmueble/Bien *</label>
-              <select
-                value={formTipoPropiedad}
-                onChange={(e) => setFormTipoPropiedad(e.target.value as 'Compra' | 'Alquiler')}
-                className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none"
-              >
-                <option value="Compra">💼 Compra</option>
-                <option value="Alquiler">💼 Alquiler</option>
-              </select>
-            </div>
-            <div>
-              <label className={`block font-bold uppercase text-[10px] mb-1 ${formTipoPropiedad === 'Alquiler' ? 'text-purple-600 font-black' : 'text-slate-400'}`}>
-                Fin de Contrato {formTipoPropiedad === 'Alquiler' && '*'}
-              </label>
-              <input
-                type="date"
-                value={formFechaFinAlquiler}
-                onChange={(e) => setFormFechaFinAlquiler(e.target.value)}
-                disabled={formTipoPropiedad === 'Compra'}
-                className={`w-full p-1.5 border rounded-lg outline-none font-mono font-bold text-xs ${formTipoPropiedad === 'Compra' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200' : 'bg-white text-purple-900 border-purple-300'
-                  }`}
-                required={formTipoPropiedad === 'Alquiler'}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Estado de Conservación Física</label>
-            <select value={formCondicion} onChange={(e) => setFormCondicion(e.target.value)} className="w-full p-2 border border-slate-200 rounded-lg bg-white font-bold text-slate-700 outline-none text-xs shadow-sm">
-              {condicionesCatalogo.map((c) => (<option key={c.id} value={c.nombre_estado}>{c.nombre_estado}</option>))}
-            </select>
-          </div>
-
-          <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Especificaciones Técnicas</label>
-            <input type="text" value={formSpecs} onChange={(e) => setFormSpecs(e.target.value)} placeholder="Ej: Core i5, 16GB RAM, 512GB SSD" className="w-full p-2 border rounded-lg outline-none text-slate-800" /></div>
-
-          <button type="submit" disabled={guardando} style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider">
-            {guardando ? "Sincronizando..." : "💾 Sincronizar Registro"}
-          </button>
-        </form>
-      </ModalBase>
+      <ModalFormularioActivo
+        isOpen={modalForm.open}
+        onClose={() => setModalForm({ open: false, modo: 'alta' })}
+        modo={modalForm.modo}
+        activo={modalForm.activo}
+        onSubmit={manejarGuardarOActualizar}
+        guardando={guardando}
+        condicionesCatalogo={condicionesCatalogo}
+        categoriasCatalogo={categoriasCatalogo}
+        marcasCatalogo={marcasCatalogo}
+        modelosCatalogo={modelosCatalogo}
+        formTipo={formTipo} setFormTipo={setFormTipo}
+        formMarca={formMarca} setFormMarca={setFormMarca}
+        formModelo={formModelo} setFormModelo={setFormModelo}
+        formSerie={formSerie} setFormSerie={setFormSerie}
+        formCaf={formCaf} setFormCaf={setFormCaf}
+        formSpecs={formSpecs} setFormSpecs={setFormSpecs}
+        formCondicion={formCondicion} setFormCondicion={setFormCondicion}
+        formTipoPropiedad={formTipoPropiedad} setFormTipoPropiedad={setFormTipoPropiedad}
+        formFechaFinAlquiler={formFechaFinAlquiler} setFormFechaFinAlquiler={setFormFechaFinAlquiler}
+        creandoNuevaFamilia={creandoNuevaFamilia} setCreandoNuevaFamilia={setCreandoNuevaFamilia}
+        nuevaFamiliaNombre={nuevaFamiliaNombre} setNuevaFamiliaNombre={setNuevaFamiliaNombre}
+        creandoNuevaMarca={creandoNuevaMarca} setCreandoNuevaMarca={setCreandoNuevaMarca}
+        nuevaMarcaNombre={nuevaMarcaNombre} setNuevaMarcaNombre={setNuevaMarcaNombre}
+        creandoNuevoModelo={creandoNuevoModelo} setCreandoNuevoModelo={setCreandoNuevoModelo}
+        nuevoModeloNombre={nuevoModeloNombre} setNuevoModeloNombre={setNuevoModeloNombre}
+      />
 
       {/* --- MODAL EXCEL --- */}
       <ModalBase isOpen={modalExcel} onClose={() => setModalExcel(false)} titulo="📥 Carga Inteligente desde Archivos Excel" subtitulo="Inyección en lote masivo para el Almacén General de TI de la Universidad.">

@@ -4,11 +4,40 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
+import { ModalFormularioActivo } from '@/components/ModalFormularioActivo';
 
 export default function AsignacionExpress() {
+
+  // ... dentro de AsignacionExpress:
+  const [modalFormOpen, setModalFormOpen] = useState(false);
+  const [condicionesCatalogo, setCondicionesCatalogo] = useState<any[]>([]);
+  const [marcasCatalogo, setMarcasCatalogo] = useState<any[]>([]);
+  const [modelosCatalogo, setModelosCatalogo] = useState<any[]>([]);
+
+  // Campos del formulario automatizado
+  const [formTipo, setFormTipo] = useState('');
+  const [formMarca, setFormMarca] = useState('');
+  const [formModelo, setFormModelo] = useState('');
+  const [formSerie, setFormSerie] = useState('');
+  const [formCaf, setFormCaf] = useState('');
+  const [formSpecs, setFormSpecs] = useState('');
+  const [formCondicion, setFormCondicion] = useState('Excelente');
+  const [formTipoPropiedad, setFormTipoPropiedad] = useState<'Compra' | 'Alquiler'>('Compra');
+  const [formFechaFinAlquiler, setFormFechaFinAlquiler] = useState('');
+
+  // Creadores rápidos inline
+  const [creandoNuevaFamilia, setCreandoNuevaFamilia] = useState(false);
+  const [nuevaFamiliaNombre, setNuevaFamiliaNombre] = useState('');
+  const [creandoNuevaMarca, setCreandoNuevaMarca] = useState(false);
+  const [nuevaMarcaNombre, setNuevaMarcaNombre] = useState('');
+  const [creandoNuevoModelo, setCreandoNuevoModelo] = useState(false);
+  const [nuevoModeloNombre, setNuevoModeloNombre] = useState('');
+
   const [loading, setLoading] = useState(false);
   const [loadingCustodia, setLoadingCustodia] = useState(false);
   const [guardando, setGuardando] = useState(false);
+
+  const [mostrarDropdownUsr, setMostrarDropdownUsr] = useState(false);
 
   // Estados base
   const [usuarios, setUsuarios] = useState<any[]>([]);
@@ -20,9 +49,9 @@ export default function AsignacionExpress() {
   const [usuarioFocus, setUsuarioFocus] = useState<any | null>(null);
   const [equiposCustodia, setEquiposCustodia] = useState<any[]>([]);
 
-  // Filtros unificados sugeridos por Jonathan
+  // Filtros unificados 
   const [areaFiltroId, setAreaFiltroId] = useState('Todos');
-  const [busquedaPredictivaUsr, setBusquedaPredictivaUsr] = useState('');
+  const [valorBuscadorUsr, setValorBuscadorUsr] = useState('');
 
   // Filtros embebidos de la tabla Almacén
   const [busquedaHw, setBusquedaHw] = useState('');
@@ -38,18 +67,23 @@ export default function AsignacionExpress() {
   const cargarInformacionBase = async () => {
     try {
       setLoading(true);
-      const [rUsr, rAct, rArea, rCat] = await Promise.all([
+      const [rUsr, rAct, rArea, rCat, rMar, rMod, rCond] = await Promise.all([
         supabase.from('usuarios').select('*, areas(*), cargos(*)').order('nombre_completo'),
         supabase.from('vista_activos_completa').select('*').eq('estado_actual', 'Disponible en Almacén TI'),
         supabase.from('areas').select('*').order('nombre_area'),
-        supabase.from('categorias_activo').select('*').order('nombre_categoria')
+        supabase.from('categorias_activo').select('*').order('nombre_categoria'),
+        supabase.from('marcas').select('*').order('nombre_marca'),
+        supabase.from('modelos').select('*').order('nombre_modelo'),
+        supabase.from('estados_conservacion').select('*').order('nombre_estado')
       ]);
 
       if (rUsr.data) setUsuarios(rUsr.data);
       if (rArea.data) setAreas(rArea.data);
       if (rCat.data) setCategorias(rCat.data);
+      if (rMar.data) setMarcasCatalogo(rMar.data);
+      if (rMod.data) setModelosCatalogo(rMod.data);
+      if (rCond.data) setCondicionesCatalogo(rCond.data);
 
-      // 🛠️ MAPEADO BLINDADO: Forzamos a que tanto id como activo_id existan en el objeto
       if (rAct.data) {
         setActivosDisponibles(rAct.data.map(i => ({
           ...i,
@@ -61,6 +95,58 @@ export default function AsignacionExpress() {
       lanzarAlerta(`❌ Error: ${err.message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Función para guardar desde Asignación Express
+  const manejarGuardarOActualizar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let categoriaFinal = creandoNuevaFamilia ? nuevaFamiliaNombre.trim() : formTipo.trim();
+    let marcaFinal = creandoNuevaMarca ? nuevaMarcaNombre.trim() : formMarca.trim();
+    let modeloFinal = creandoNuevoModelo ? nuevoModeloNombre.trim() : formModelo.trim();
+
+    try {
+      setGuardando(true);
+
+      if (creandoNuevaFamilia) {
+        await supabase.from('categorias_activo').insert([{ nombre_categoria: categoriaFinal }]);
+      }
+      const { data: catActual } = await supabase.from('categorias_activo').select('id').eq('nombre_categoria', categoriaFinal).single();
+
+      if (creandoNuevaMarca && catActual) {
+        await supabase.from('marcas').insert([{ nombre_marca: marcaFinal, categoria_id: catActual.id }]);
+      }
+      const { data: marcaActual } = await supabase.from('marcas').select('id').eq('nombre_marca', marcaFinal).single();
+
+      if (creandoNuevoModelo && marcaActual) {
+        await supabase.from('modelos').insert([{ nombre_modelo: modeloFinal, marca_id: marcaActual.id }]);
+      }
+
+      const payload = {
+        p_id: null,
+        p_serial_id: formSerie.trim(),
+        p_nombre_categoria: categoriaFinal,
+        p_nombre_marca: marcaFinal,
+        p_nombre_modelo: modeloFinal,
+        p_caf: formCaf.trim() || null,
+        p_especificaciones: formSpecs.trim() || null,
+        p_estado_actual: 'Disponible en Almacén TI'
+      };
+
+      const { error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
+      if (rpcError) throw rpcError;
+
+      lanzarAlerta("✅ Activo creado exitosamente en el Almacén.");
+      setModalFormOpen(false);
+      cargarInformacionBase();
+    } catch (err: any) {
+      if (err.message?.includes('activos_serial_id_key')) {
+        lanzarAlerta(`⚠️ La serie "${formSerie.trim()}" ya existe en la Universidad.`);
+      } else {
+        lanzarAlerta(`❌ Error: ${err.message}`);
+      }
+    } finally {
+      setGuardando(false);
     }
   };
 
@@ -79,9 +165,9 @@ export default function AsignacionExpress() {
 
       console.log("Datos brutos devueltos por la vista:", data);
 
-      setEquiposCustodia((data || []).map(i => ({ 
-        ...i, 
-        id: i.activo_id || i.id 
+      setEquiposCustodia((data || []).map(i => ({
+        ...i,
+        id: i.activo_id || i.id
       })));
     } catch (err: any) {
       lanzarAlerta(`❌ Error: ${err.message}`);
@@ -116,10 +202,11 @@ export default function AsignacionExpress() {
     } catch (err: any) { lanzarAlerta(`❌ Error: ${err.message}`); } finally { setGuardando(false); }
   };
 
-  // 🔍 FILTRADO INTELIGENTE PREDICTIVO DEL SELECTOR SUPERIOR
+  // 🔍 FILTRADO INTELIGENTE PREDICTIVO DEL SELECTOR SUPERIOR (CORREGIDO)
   const colaboradoresFiltrados = usuarios.filter(u => {
     const coincideArea = areaFiltroId === 'Todos' || String(u.area_id) === areaFiltroId;
-    const term = busquedaPredictivaUsr.toLowerCase().trim();
+    // 🚀 Cambiado de busquedaPredictivaUsr a valorBuscadorUsr para que lea el datalist
+    const term = valorBuscadorUsr.toLowerCase().trim();
     const coincideTexto = !term || String(u.nombre_completo).toLowerCase().includes(term) || String(u.dni).includes(term);
     return coincideArea && coincideTexto;
   });
@@ -138,7 +225,7 @@ export default function AsignacionExpress() {
       badgeStatus="online"
     >
       {alerta && (
-        <div className="fixed top-4 right-4 z-50 px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xl">
+        <div className="fixed top-4 right-4 z-[100] px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl shadow-xl">
           {alerta}
         </div>
       )}
@@ -159,22 +246,75 @@ export default function AsignacionExpress() {
             </select>
           </div>
 
-          <div className="w-full sm:w-3/4 flex flex-col space-y-1">
+          {/* SELECTOR CON BUSCADOR ESTÁTICO DE ANCHO COMPLETO */}
+          <div className="w-full sm:w-3/4 flex flex-col space-y-1 relative">
             <span className="font-bold text-slate-400 uppercase text-[9px] tracking-wider">Escribe Nombre o DNI para Fijar Colaborador:</span>
-            <select
-              value={usuarioFocus?.id || ''}
-              onChange={(e) => {
-                const u = usuarios.find(usr => usr.id === Number(e.target.value));
-                setUsuarioFocus(u || null);
-                if (u) cargarCustodiaPersona(u.id); else setEquiposCustodia([]);
-              }}
-              className="w-full p-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg font-black text-slate-800 outline-none cursor-pointer transition-all"
-            >
-              <option value="">{colaboradoresFiltrados.length === 0 ? "⚠️ NO SE ENCONTRARON COLABORADORES EN ESTA ÁREA" : "🔍 ESCRIBE O SELECCIONA AQUÍ..."}</option>
-              {colaboradoresFiltrados.map(u => (
-                <option key={u.id} value={u.id}>{u.nombre_completo} (🪪 DNI: {u.dni || 'S/D'})</option>
-              ))}
-            </select>
+            
+            <div className="relative w-full">
+              <input
+                type="text"
+                value={valorBuscadorUsr}
+                onFocus={() => setMostrarDropdownUsr(true)}
+                onBlur={() => {
+                  // Pequeño delay para permitir que el clic en la opción se procese antes de ocultar el menú
+                  setTimeout(() => setMostrarDropdownUsr(false), 200);
+                }}
+                onChange={(e) => {
+                  const entrada = e.target.value;
+                  setValorBuscadorUsr(entrada);
+
+                  // Si el usuario borra el texto, rompemos el foco por seguridad estricta
+                  const usuarioEncontrado = usuarios.find(
+                    u => `${u.nombre_completo} (🪪 DNI: ${u.dni || 'S/D'})` === entrada
+                  );
+                  if (!usuarioEncontrado) {
+                    setUsuarioFocus(null);
+                    setEquiposCustodia([]);
+                  }
+                }}
+                placeholder="🔍 Haz clic o escribe para buscar por Nombre o DNI..."
+                className="w-full p-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-lg font-black text-slate-800 outline-none text-xs shadow-inner transition-all"
+              />
+
+              {/* Menú desplegable estático alineado al 100% del ancho del input */}
+              {mostrarDropdownUsr && colaboradoresFiltrados.length > 0 && (
+                <div className="absolute left-0 right-0 bg-white border border-slate-200 rounded-lg max-h-48 overflow-y-auto z-[60] mt-1 shadow-xl divide-y w-full">
+                  {colaboradoresFiltrados.slice(0, 6).map((u) => (
+                    <div
+                      key={u.id}
+                      onMouseDown={() => {
+                        // Usamos onMouseDown porque se ejecuta antes que el onBlur del input
+                        const textoOpcion = `${u.nombre_completo} (🪪 DNI: ${u.dni || 'S/D'})`;
+                        setValorBuscadorUsr(textoOpcion);
+                        setUsuarioFocus(u);
+                        cargarCustodiaPersona(u.id);
+                        setMostrarDropdownUsr(false);
+                      }}
+                      className="p-2 hover:bg-slate-100 cursor-pointer font-bold text-slate-700 text-xs transition-colors flex justify-between items-center w-full"
+                    >
+                      <span>👤 {u.nombre_completo}</span>
+                      <span className="font-mono text-[10px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded border">
+                        🪪 DNI: {u.dni || 'S/D'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Mensaje en caso de que escriba algo que no exista */}
+              {mostrarDropdownUsr && valorBuscadorUsr.trim() !== '' && colaboradoresFiltrados.length === 0 && (
+                <div className="absolute left-0 right-0 bg-red-50 border border-red-200 text-red-700 p-2 rounded-lg text-[11px] font-bold z-[60] mt-1 shadow-md w-full">
+                  ⚠️ El colaborador no existe o no pertenece al área.
+                </div>
+              )}
+            </div>
+
+            {/* Indicador visual de verificación exitosa */}
+            {usuarioFocus && (
+              <span className="text-[10px] text-emerald-600 font-bold animate-fade-in mt-0.5">
+                🔒 Colaborador fijado y verificado correctamente.
+              </span>
+            )}
           </div>
         </div>
 
@@ -279,12 +419,49 @@ export default function AsignacionExpress() {
                 <option value="Todos">Todas las Familias</option>
                 {categorias.map(c => <option key={c.id} value={c.nombre_categoria}>{c.nombre_categoria}</option>)}
               </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setFormTipo(''); setFormMarca(''); setFormModelo(''); setFormSerie(''); setFormCaf(''); setFormSpecs('');
+                  setModalFormOpen(true);
+                }}
+                className="p-1.5 bg-blue-800 text-white font-black text-[11px] uppercase rounded-md shadow-sm transition-all"
+                style={{ backgroundColor: 'rgb(1, 71, 118)' }}
+              >
+                ➕ Crear Activo
+              </button>
             </TablaControl>
           </div>
 
         </div>
 
       </div>
+      <ModalFormularioActivo
+        isOpen={modalFormOpen}
+        onClose={() => setModalFormOpen(false)}
+        modo="alta"
+        onSubmit={manejarGuardarOActualizar}
+        guardando={guardando}
+        condicionesCatalogo={condicionesCatalogo}
+        categoriasCatalogo={categorias}
+        marcasCatalogo={marcasCatalogo}
+        modelosCatalogo={modelosCatalogo}
+        formTipo={formTipo} setFormTipo={setFormTipo}
+        formMarca={formMarca} setFormMarca={setFormMarca}
+        formModelo={formModelo} setFormModelo={setFormModelo}
+        formSerie={formSerie} setFormSerie={setFormSerie}
+        formCaf={formCaf} setFormCaf={setFormCaf}
+        formSpecs={formSpecs} setFormSpecs={setFormSpecs}
+        formCondicion={formCondicion} setFormCondicion={setFormCondicion}
+        formTipoPropiedad={formTipoPropiedad} setFormTipoPropiedad={setFormTipoPropiedad}
+        formFechaFinAlquiler={formFechaFinAlquiler} setFormFechaFinAlquiler={setFormFechaFinAlquiler}
+        creandoNuevaFamilia={creandoNuevaFamilia} setCreandoNuevaFamilia={setCreandoNuevaFamilia}
+        nuevaFamiliaNombre={nuevaFamiliaNombre} setNuevaFamiliaNombre={setNuevaFamiliaNombre}
+        creandoNuevaMarca={creandoNuevaMarca} setCreandoNuevaMarca={setCreandoNuevaMarca}
+        nuevaMarcaNombre={nuevaMarcaNombre} setNuevaMarcaNombre={setNuevaMarcaNombre}
+        creandoNuevoModelo={creandoNuevoModelo} setCreandoNuevoModelo={setCreandoNuevoModelo}
+        nuevoModeloNombre={nuevoModeloNombre} setNuevoModeloNombre={setNuevoModeloNombre}
+      />
     </ContenedorVista>
   );
 }
