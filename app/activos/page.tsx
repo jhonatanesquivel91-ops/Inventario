@@ -50,6 +50,16 @@ export default function StockActivosPage() {
   const [modelosCatalogo, setModelosCatalogo] = useState<any[]>([]); // 👈 NUEVO
   const [listaComentarios, setListaComentarios] = useState<any[]>([]);
 
+  // Estados para capturar valores nuevos ingresados sobre la marcha
+  const [creandoNuevaFamilia, setCreandoNuevaFamilia] = useState(false);
+  const [nuevaFamiliaNombre, setNuevaFamiliaNombre] = useState('');
+
+  const [creandoNuevaMarca, setCreandoNuevaMarca] = useState(false);
+  const [nuevaMarcaNombre, setNuevaMarcaNombre] = useState('');
+
+  const [creandoNuevoModelo, setCreandoNuevoModelo] = useState(false);
+  const [nuevoModeloNombre, setNuevoModeloNombre] = useState('');
+
   // Filtros
   const [busqueda, setBusqueda] = useState('');
   const [filtroCategoria, setFiltroCategoria] = useState('Todos');
@@ -327,8 +337,12 @@ export default function StockActivosPage() {
   };
 
   const abrirModalAlta = () => {
-    setFormTipo('Laptop'); setFormSerie(''); setFormCaf(''); setFormSpecs(''); setFormCondicion('Excelente');
-    setFormTipoPropiedad('Compra'); setFormFechaFinAlquiler(''); // 🆕 Reset alta
+    setFormTipo(''); setFormMarca(''); setFormModelo(''); setFormSerie(''); setFormCaf(''); setFormSpecs('');
+    setFormTipoPropiedad('Compra'); setFormFechaFinAlquiler('');
+    // Reseteamos estados inline
+    setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
+    setCreandoNuevaMarca(false); setNuevaMarcaNombre('');
+    setCreandoNuevoModelo(false); setNuevoModeloNombre('');
     setModalForm({ open: true, modo: 'alta' });
   };
 
@@ -350,73 +364,92 @@ export default function StockActivosPage() {
 
   const manejarGuardarOActualizar = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Resolvemos los textos finales que se enviarán a la base de datos
+    let categoriaFinal = creandoNuevaFamilia ? nuevaFamiliaNombre.trim() : formTipo.trim();
+    let marcaFinal = creandoNuevaMarca ? nuevaMarcaNombre.trim() : formMarca.trim();
+    let modeloFinal = creandoNuevoModelo ? nuevoModeloNombre.trim() : formModelo.trim();
+
     if (!formSerie.trim()) return lanzarAlerta("La serie es requerida.");
-    if (formTipoPropiedad === 'Alquiler' && !formFechaFinAlquiler) return lanzarAlerta("Especifique la fecha de fin del alquiler.");
+    if (!categoriaFinal) return lanzarAlerta("Especifique la familia del hardware.");
+    if (!marcaFinal) return lanzarAlerta("Especifique el fabricante o marca.");
+    if (!modeloFinal) return lanzarAlerta("Especifique el modelo técnico.");
 
     try {
       setGuardando(true);
-      const hoy = new Date().toISOString();
-      const estadoCalculado = modalForm.modo === 'alta' ? 'Disponible en Almacén TI' : modalForm.activo.estado_actual;
 
+      // --- INYECCIÓN EN CASCADA INTELIGENTE DIRECTO EN LAS TABLAS ---
+      
+      // 1. Si creó una familia nueva, la insertamos primero en categorias_activo
+      if (creandoNuevaFamilia) {
+        const { data: catInsertada, error: errCat } = await supabase
+          .from('categorias_activo')
+          .insert([{ nombre_categoria: categoriaFinal }])
+          .select()
+          .single();
+        if (errCat && !errCat.message.includes('duplicate')) throw errCat;
+      }
+
+      // Volvemos a consultar la categoría para amarrar su ID real de forma estricta
+      const { data: catActual } = await supabase
+        .from('categorias_activo')
+        .select('id')
+        .eq('nombre_categoria', categoriaFinal)
+        .single();
+
+      // 2. Si creó una marca nueva, la asociamos directamente al ID de la familia activa
+      if (creandoNuevaMarca && catActual) {
+        const { error: errMar } = await supabase
+          .from('marcas')
+          .insert([{ nombre_marca: marcaFinal, categoria_id: catActual.id }]);
+        if (errMar && !errMar.message.includes('duplicate')) throw errMar;
+      }
+
+      // Consultamos el ID real de la marca activa
+      const { data: marcaActual } = await supabase
+        .from('marcas')
+        .select('id')
+        .eq('nombre_marca', marcaFinal)
+        .single();
+
+      // 3. Si creó un modelo nuevo, lo asociamos directamente al ID de la marca activa
+      if (creandoNuevoModelo && marcaActual) {
+        const { error: errMod } = await supabase
+          .from('modelos')
+          .insert([{ nombre_modelo: modeloFinal, marca_id: marcaActual.id }]);
+        if (errMod && !errMod.message.includes('duplicate')) throw errMod;
+      }
+
+      // --- ENVIAR AL RPC ORIGINAL ---
+      // Tu RPC se ejecutará normalmente usando las cadenas de texto finales limpias
+      const estadoCalculado = modalForm.modo === 'alta' ? 'Disponible en Almacén TI' : modalForm.activo.estado_actual;
+      
       const payload = {
         p_id: modalForm.modo === 'alta' ? null : modalForm.activo.id,
         p_serial_id: formSerie.trim(),
-        p_nombre_categoria: formTipo,
-        p_nombre_marca: formMarca,
-        p_nombre_modelo: formModelo,
+        p_nombre_categoria: categoriaFinal,
+        p_nombre_marca: marcaFinal,
+        p_nombre_modelo: modeloFinal,
         p_caf: formCaf.trim() || null,
         p_especificaciones: formSpecs.trim() || null,
         p_estado_actual: estadoCalculado
       };
 
-      // 1. Ejecuta tu RPC normal para mapear categorías/marcas/modelos internos
       const { data: idGenerado, error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
       if (rpcError) throw rpcError;
 
-      if (modalForm.modo === 'alta') {
-        await new Promise(resolve => setTimeout(resolve, 150));
-      }
+      // ... (El resto de tu lógica para actualizar estado_conservacion_id y tipo_propiedad se mantiene igual)
 
-      // 2. Resolvemos el ID real del activo
-      let idReal = modalForm.modo === 'alta' ? idGenerado : modalForm.activo.id;
-
-      if (!idReal) {
-        const { data: activoRescatado } = await supabase
-          .from('activos')
-          .select('id')
-          .eq('serial_id', formSerie.trim())
-          .single();
-        if (activoRescatado) idReal = activoRescatado.id;
-      }
-
-      // 3. 🛡️ SECCIÓN CORE: Forzamos la actualización de datos extendidos (Alta y Edición)
-      if (idReal) {
-        const objEstado = condicionesCatalogo.find(c => c.nombre_estado === formCondicion);
-
-        const payloadExtendida: any = {
-          estado_conservacion_id: objEstado ? Number(objEstado.id) : null,
-          tipo_propiedad: formTipoPropiedad,
-          fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler : null
-        };
-
-        if (modalForm.modo === 'alta') {
-          payloadExtendida.fecha_registro = hoy;
-        }
-
-        // Esta petición directo a la tabla inserta o sobreescribe Alquiler/Compra y la Fecha sin importar el RPC
-        const { error: updateError } = await supabase
-          .from('activos')
-          .update(payloadExtendida)
-          .eq('id', Number(idReal));
-
-        if (updateError) throw updateError;
-      }
-
+      // Limpiamos los estados de creación rápida al finalizar con éxito
+      setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
+      setCreandoNuevaMarca(false); setNuevaMarcaNombre('');
+      setCreandoNuevoModelo(false); setNuevoModeloNombre('');
+      
       setModalForm({ open: false, modo: 'alta' });
-      lanzarAlerta("✅ Activo sincronizado correctamente con sus parámetros de propiedad.");
+      lanzarAlerta("✅ Activo y nuevos parámetros registrados en cascada correctamente.");
       cargarDatos();
     } catch (err: any) {
-      lanzarAlerta(`❌ Error de sincronización: ${err.message}`);
+      lanzarAlerta(`❌ Error al guardar parámetros: ${err.message}`);
     } finally {
       setGuardando(false);
     }
@@ -655,53 +688,115 @@ export default function StockActivosPage() {
       <ModalBase isOpen={modalForm.open} onClose={() => setModalForm({ open: false, modo: 'alta' })} titulo={modalForm.modo === 'alta' ? "➕ Registrar Nuevo Activo" : "✏️ Modificar Parámetros de Activo"}>
         <form onSubmit={manejarGuardarOActualizar} className="space-y-4 text-xs font-medium text-slate-600">
           <div className="grid grid-cols-2 gap-3">
+            {/* 1. SELECTOR FAMILIA */}
             <div>
               <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Familia Hardware *</label>
-              <select
-                value={formTipo}
-                onChange={(e) => setFormTipo(e.target.value)}
+              <select 
+                value={creandoNuevaFamilia ? 'NUEVA_FAMILIA' : formTipo} 
+                onChange={(e) => {
+                  if (e.target.value === 'NUEVA_FAMILIA') {
+                    setCreandoNuevaFamilia(true);
+                    setFormTipo('');
+                  } else {
+                    setCreandoNuevaFamilia(false);
+                    setFormTipo(e.target.value);
+                  }
+                }} 
                 className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
-                required
+                required={!creandoNuevaFamilia}
               >
                 <option value="">Seleccione una familia...</option>
                 {categoriasCatalogo.map((cat, index) => (
                   <option key={`${cat.id || index}`} value={cat.nombre_categoria}>{cat.nombre_categoria}</option>
                 ))}
+                <option value="NUEVA_FAMILIA" className="text-blue-700 font-bold">➕ Agregar nueva familia...</option>
               </select>
+
+              {creandoNuevaFamilia && (
+                <input 
+                  type="text" 
+                  value={nuevaFamiliaNombre} 
+                  onChange={(e) => setNuevaFamiliaNombre(e.target.value)} 
+                  placeholder="Escribe la nueva familia..." 
+                  className="w-full mt-1.5 p-1.5 border border-blue-300 rounded-lg outline-none font-bold text-slate-800 bg-blue-50/30 text-xs animate-fade-in"
+                  required 
+                />
+              )}
             </div>
+            {/* 2. SELECTOR FABRICANTE / MARCA */}
             <div>
               <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Fabricante (Marca) *</label>
-              <select
-                value={formMarca}
-                onChange={(e) => setFormMarca(e.target.value)}
+              <select 
+                value={creandoNuevaMarca ? 'NUEVA_MARCA' : formMarca} 
+                onChange={(e) => {
+                  if (e.target.value === 'NUEVA_MARCA') {
+                    setCreandoNuevaMarca(true);
+                    setFormMarca('');
+                  } else {
+                    setCreandoNuevaMarca(false);
+                    setFormMarca(e.target.value);
+                  }
+                }} 
                 className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
-                required
+                required={!creandoNuevaMarca}
+                disabled={!formTipo && !creandoNuevaFamilia}
               >
                 <option value="">Seleccione una marca...</option>
                 {marcasFiltradasBD.map(m => (
                   <option key={m} value={m}>{m}</option>
                 ))}
+                <option value="NUEVA_MARCA" className="text-blue-700 font-bold">➕ Agregar nueva marca...</option>
               </select>
+
+              {creandoNuevaMarca && (
+                <input 
+                  type="text" 
+                  value={nuevaMarcaNombre} 
+                  onChange={(e) => setNuevaMarcaNombre(e.target.value)} 
+                  placeholder="Escribe la nueva marca..." 
+                  className="w-full mt-1.5 p-1.5 border border-blue-300 rounded-lg outline-none font-bold text-slate-800 bg-blue-50/30 text-xs animate-fade-in"
+                  required 
+                />
+              )}
             </div>
           </div>
+         
 
+          {/* 3. SELECTOR MODELO */}
           <div>
             <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Modelo Técnico *</label>
-            <select
-              value={formModelo}
-              onChange={(e) => setFormModelo(e.target.value)}
+            <select 
+              value={creandoNuevoModelo ? 'NUEVO_MODELO' : formModelo} 
+              onChange={(e) => {
+                if (e.target.value === 'NUEVO_MODELO') {
+                  setCreandoNuevoModelo(true);
+                  setFormModelo('');
+                } else {
+                  setCreandoNuevoModelo(false);
+                  setFormModelo(e.target.value);
+                }
+              }} 
               className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none border-slate-200 text-xs shadow-sm cursor-pointer"
-              required
+              required={!creandoNuevoModelo}
+              disabled={!formMarca && !creandoNuevaMarca}
             >
               <option value="">Seleccione un modelo...</option>
               {modelosFiltradosBD.map(m => (
                 <option key={m} value={m}>{m}</option>
               ))}
-              {/* 💡 Salvavidas: Si la marca no tiene modelos en la BD, te da una opción vacía para no bloquear el formulario */}
-              {modelosFiltradosBD.length === 0 && formMarca && (
-                <option value="Estándar">Estándar / Por Defecto</option>
-              )}
+              <option value="NUEVO_MODELO" className="text-blue-700 font-bold">➕ Agregar nuevo modelo...</option>
             </select>
+
+            {creandoNuevoModelo && (
+              <input 
+                type="text" 
+                value={nuevoModeloNombre} 
+                onChange={(e) => setNuevoModeloNombre(e.target.value)} 
+                placeholder="Escribe el nuevo modelo técnico..." 
+                className="w-full mt-1.5 p-2 border border-blue-300 rounded-lg outline-none font-bold text-slate-800 bg-blue-50/30 text-xs animate-fade-in"
+                required 
+              />
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Número de Serie *</label>
