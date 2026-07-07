@@ -16,6 +16,12 @@ export default function ConfiguracionPage() {
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [busqueda, setBusqueda] = useState('');
+  
+  // 🏁 Un solo filtro por familia limpio para las mallas de Marcas y Modelos
+  const [filtroFamiliaTabla, setFiltroFamiliaTabla] = useState('Todos');
+
+  // El ayudante del formulario se queda exactamente igual
+  const [formFamiliaId, setFormFamiliaId] = useState('');
 
   // --- ARREGLOS DE DATOS MAESTROS ---
   const [categorias, setCategorias] = useState<any[]>([]);
@@ -26,7 +32,7 @@ export default function ConfiguracionPage() {
   // --- ESTADOS DEL FORMULARIO REUTILIZABLE ---
   const [idEditando, setIdEditando] = useState<number | null>(null);
   const [formNombre, setFormNombre] = useState('');
-  const [formPadreId, setFormPadreId] = useState(''); 
+  const [formPadreId, setFormPadreId] = useState('');
   const [colorHex, setColorHex] = useState('#1E293B');
 
   const [modalEliminar, setModalEliminar] = useState<{ open: boolean; id: number | null; tabla: string }>({ open: false, id: null, tabla: '' });
@@ -48,21 +54,21 @@ export default function ConfiguracionPage() {
       ]);
 
       if (rCat.data) setCategorias(rCat.data.map(i => ({ ...i, id: i.id })));
-      
+
       if (rMar.data) {
-        setMarcas(rMar.data.map(i => ({ 
-          ...i, 
-          id: i.id, 
-          categoria_nombre: i.categorias_activo?.nombre_categoria || 'N/A' 
+        setMarcas(rMar.data.map(i => ({
+          ...i,
+          id: i.id,
+          categoria_nombre: i.categorias_activo?.nombre_categoria || 'N/A'
         })));
       }
-      
+
       if (rMod.data) {
-        setModelos(rMod.data.map(i => ({ 
-          ...i, 
-          id: i.id, 
-          marca_nombre: i.marcas?.nombre_marca || 'N/A', 
-          categoria_nombre: i.marcas?.categorias_activo?.nombre_categoria || 'N/A' 
+        setModelos(rMod.data.map(i => ({
+          ...i,
+          id: i.id,
+          marca_nombre: i.marcas?.nombre_marca || 'N/A',
+          categoria_nombre: i.marcas?.categorias_activo?.nombre_categoria || 'N/A'
         })));
       }
 
@@ -78,12 +84,14 @@ export default function ConfiguracionPage() {
     cargarCatalogos();
     limpiarFormulario();
     setBusqueda('');
+    setFiltroFamiliaTabla('Todos'); // 👈 Limpia el filtro al cambiar de pestaña
   }, [subTab]);
 
   const limpiarFormulario = () => {
     setIdEditando(null);
     setFormNombre('');
     setFormPadreId('');
+    setFormFamiliaId(''); // 👈 Limpiamos el ayudante del formulario
     setColorHex('#1E293B');
   };
 
@@ -96,8 +104,18 @@ export default function ConfiguracionPage() {
     else if (subTab === 'modelos') fuente = modelos;
     else if (subTab === 'condiciones') fuente = condiciones;
 
+    // 🎯 FILTRO ÚNICO POR FAMILIA (Corregido para Marcas y Modelos)
+    if (filtroFamiliaTabla !== 'Todos') {
+      if (subTab === 'marcas' || subTab === 'modelos') {
+        fuente = fuente.filter(item => 
+          String(item.categoria_nombre || '').toLowerCase().trim() === filtroFamiliaTabla.toLowerCase().trim()
+        );
+      }
+    }
+
     if (!term) return fuente;
 
+    // FILTRADO POR TEXTO GLOBAL (BUSCADOR)
     return fuente.filter(item => {
       return (
         String(item.nombre_categoria || '').toLowerCase().includes(term) ||
@@ -108,15 +126,7 @@ export default function ConfiguracionPage() {
         String(item.nombre_estado || '').toLowerCase().includes(term)
       );
     });
-  }, [subTab, categorias, marcas, modelos, condiciones, busqueda]);
-
-  const activarEdicion = (item: any) => {
-    setIdEditando(item.id);
-    if (subTab === 'categorias') setFormNombre(item.nombre_categoria);
-    else if (subTab === 'marcas') { setFormNombre(item.nombre_marca); setFormPadreId(String(item.categoria_id)); }
-    else if (subTab === 'modelos') { setFormNombre(item.nombre_modelo); setFormPadreId(String(item.marca_id)); }
-    else if (subTab === 'condiciones') { setFormNombre(item.nombre_estado); setColorHex(item.color_alerta || '#1E293B'); }
-  };
+  }, [subTab, categorias, marcas, modelos, condiciones, busqueda, filtroFamiliaTabla]);
 
   const manejarGuardar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -157,7 +167,7 @@ export default function ConfiguracionPage() {
       setGuardando(true);
       const { error } = await supabase.from(modalEliminar.tabla).delete().eq('id', modalEliminar.id);
       if (error) throw new Error("Restricción de integridad: Este parámetro está asignado a equipos en el almacén.");
-      
+
       setModalEliminar({ open: false, id: null, tabla: '' });
       lanzarAlerta("🗑️ Registro eliminado de la base de datos.");
       limpiarFormulario();
@@ -167,6 +177,21 @@ export default function ConfiguracionPage() {
     } finally {
       setGuardando(false);
     }
+  };
+  const activarEdicion = (item: any) => {
+    setIdEditando(item.id);
+    if (subTab === 'categorias') setFormNombre(item.nombre_categoria);
+    else if (subTab === 'marcas') { setFormNombre(item.nombre_marca); setFormPadreId(String(item.categoria_id)); }
+    else if (subTab === 'modelos') {
+      setFormNombre(item.nombre_modelo);
+      // Buscamos la marca en el catálogo maestro para extraer su familia_id original
+      const marcaCorrespondiente = marcas.find(m => m.id === item.marca_id);
+      if (marcaCorrespondiente) {
+        setFormFamiliaId(String(marcaCorrespondiente.categoria_id));
+      }
+      setFormPadreId(String(item.marca_id));
+    }
+    else if (subTab === 'condiciones') { setFormNombre(item.nombre_estado); setColorHex(item.color_alerta || '#1E293B'); }
   };
 
   const columnasConfig = useMemo(() => {
@@ -212,9 +237,9 @@ export default function ConfiguracionPage() {
       <HeaderVista titulo="⚙️ Consola de Configuración Global" subtitulo="Mantenimiento de catálogos jerárquicos de hardware y estados de conservación dinámicos." badgeStatus="online">
         <div className="flex bg-slate-100 p-1 rounded-xl border text-[11px] font-black gap-1">
           {(['categorias', 'marcas', 'modelos', 'condiciones'] as const).map((tab) => (
-            <button 
+            <button
               key={tab}
-              onClick={() => setSubTab(tab)} 
+              onClick={() => setSubTab(tab)}
               className={`px-3 py-1.5 rounded-lg transition-all capitalize ${subTab === tab ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
               style={subTab === tab ? { color: 'rgb(1, 71, 118)' } : {}}
             >
@@ -225,35 +250,51 @@ export default function ConfiguracionPage() {
       </HeaderVista>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 overflow-hidden">
-        
+
         {/* COLUMNA IZQUIERDA (2/3) */}
         <div className="lg:col-span-2 flex flex-col min-h-0 bg-white rounded-xl border overflow-hidden">
           <TablaControl tituloSeccion={`Registros en Malla`} badgeCount={datasetFiltrado.length} data={datasetFiltrado} loading={loading} columnas={columnasConfig}>
-            <BuscadorControl value={busqueda} onChange={setBusqueda} placeholder={`Buscar dentro de este catálogo técnico...`} />
+            <div className="flex flex-col sm:flex-row gap-2 w-full items-center">
+              <BuscadorControl value={busqueda} onChange={setBusqueda} placeholder={`Buscar dentro de este catálogo técnico...`} />
+              
+              {/* 📦 Selector único por familia para Marcas y Modelos */}
+              {(subTab === 'marcas' || subTab === 'modelos') && (
+                <select
+                  value={filtroFamiliaTabla}
+                  onChange={(e) => setFiltroFamiliaTabla(e.target.value)}
+                  className="p-1.5 border border-slate-200 rounded-xl bg-white text-[11px] font-bold text-slate-600 outline-none w-full sm:w-44 cursor-pointer shadow-sm"
+                >
+                  <option value="Todos">📦 Todas las Familias</option>
+                  {categorias.map(c => (
+                    <option key={c.id} value={c.nombre_categoria}>📦 {c.nombre_categoria}</option>
+                  ))}
+                </select>
+              )}
+            </div>
           </TablaControl>
         </div>
 
         {/* COLUMNA DERECHA (1/3) - TU PANEL COMPONENTE REUTILIZABLE */}
-        <PanelFormulario 
-          idEditando={idEditando} 
-          onCancelar={limpiarFormulario} 
-          onSubmit={manejarGuardar} 
+        <PanelFormulario
+          idEditando={idEditando}
+          onCancelar={limpiarFormulario}
+          onSubmit={manejarGuardar}
           guardando={guardando}
         >
           {/* INPUT DINÁMICO */}
           <div className="space-y-1">
             <label className="block font-bold text-slate-500 uppercase text-[10px]">
               {subTab === 'categorias' ? 'Nombre de Familia Hardware *' :
-               subTab === 'marcas' ? 'Nombre de la Marca / Fabricante *' :
-               subTab === 'modelos' ? 'Nombre del Modelo Técnico *' : 'Nombre del Estado de Conservación *'}
+                subTab === 'marcas' ? 'Nombre de la Marca / Fabricante *' :
+                  subTab === 'modelos' ? 'Nombre del Modelo Técnico *' : 'Nombre del Estado de Conservación *'}
             </label>
-            <input 
-              type="text" 
-              value={formNombre} 
-              onChange={(e) => setFormNombre(e.target.value)} 
-              placeholder="Ingresa el valor descriptivo aquí..." 
-              className="w-full p-2 border border-slate-200 rounded-lg outline-none font-bold text-slate-800 bg-white text-xs" 
-              required 
+            <input
+              type="text"
+              value={formNombre}
+              onChange={(e) => setFormNombre(e.target.value)}
+              placeholder="Ingresa el valor descriptivo aquí..."
+              className="w-full p-2 border border-slate-200 rounded-lg outline-none font-bold text-slate-800 bg-white text-xs"
+              required
             />
           </div>
 
@@ -270,9 +311,13 @@ export default function ConfiguracionPage() {
           {subTab === 'modelos' && (
             <div className="space-y-1 animate-fade-in">
               <label className="block font-bold text-slate-500 uppercase text-[10px]">Asociar a Marca Fabricante *</label>
-              <select value={formPadreId} onChange={(e) => setFormPadreId(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 text-xs" required>
+              <select value={formPadreId} onChange={(e) => setFormPadreId(e.target.value)} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 text-xs shadow-sm cursor-pointer" required>
                 <option value="">-- Selecciona una Marca --</option>
-                {marcas.map(m => <option key={m.id} value={m.id}>{m.nombre_marca}</option>)}
+                {marcas.map(m => (
+                  <option key={m.id} value={m.id}>
+                    🏷️ {m.nombre_marca} [{m.categoria_nombre}]
+                  </option>
+                ))}
               </select>
             </div>
           )}
