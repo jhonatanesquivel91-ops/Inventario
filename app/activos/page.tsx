@@ -234,8 +234,13 @@ export default function StockActivosPage() {
   const metricasTI = useMemo(() => {
     return {
       total: activos.length,
-      asignados: activos.filter(a => a.estado_actual === 'Asignado').length,
-      disponibles: activos.filter(a => a.estado_actual === 'Disponible en Almacén TI').length,
+      // 1. En custodia: Tiene un dueño asignado
+      asignados: activos.filter(a => a.nombre_completo || a.asignado_usuario_id).length,
+      
+      // 🛠️ 2. Stock Disponible CORREGIDO: Está en almacén Y además NO tiene ningún dueño asignado
+      disponibles: activos.filter(a => a.estado_actual === 'Disponible en Almacén TI' && !a.nombre_completo && !a.asignado_usuario_id).length,
+      
+      // 3. Dados de baja: Su estado operativo es de baja
       bajas: activos.filter(a => a.estado_actual === 'Dado de Baja').length
     };
   }, [activos]);
@@ -468,8 +473,13 @@ export default function StockActivosPage() {
       setGuardando(true);
       const targets = modalConfirmarBaja.masivo ? seleccionados : [modalConfirmarBaja.id];
       const nuevoEstado = modalConfirmarBaja.restaurar ? 'Disponible en Almacén TI' : 'Dado de Baja';
+      // 🛠️ Si es baja, ponemos asignado_usuario_id en null para que ya no le pertenezca a nadie
+      const payloadUpdate: any = { estado_actual: nuevoEstado };
+      if (!modalConfirmarBaja.restaurar) {
+        payloadUpdate.asignado_usuario_id = null;
+      }
 
-      const { error } = await supabase.from('activos').update({ estado_actual: nuevoEstado }).in('id', targets);
+      const { error } = await supabase.from('activos').update(payloadUpdate).in('id', targets);
       if (error) throw error;
 
       setSeleccionados([]);
@@ -477,6 +487,34 @@ export default function StockActivosPage() {
       lanzarAlerta(modalConfirmarBaja.restaurar ? "🔄 Hardware restaurado en stock." : "✅ Registro enviado a bajas.");
       cargarDatos();
     } catch (err: any) { lanzarAlerta(`❌ Error: ${err.message}`); } finally { setGuardando(false); }
+  };
+
+  const ejecutarLiberacionMasiva = async () => {
+    if (seleccionados.length === 0) return;
+    try {
+      setGuardando(true);
+
+      // 1. Terminamos las asignaciones activas de los equipos seleccionados
+      await supabase.from('asignaciones')
+        .update({ fecha_devolucion: new Date().toISOString(), estado_asignacion: 'Devuelto' })
+        .in('activo_id', seleccionados)
+        .eq('estado_asignacion', 'Activo');
+
+      // 2. Regresamos los activos físicos al Almacén y limpiamos sus custodios
+      const { error } = await supabase.from('activos')
+        .update({ estado_actual: 'Disponible en Almacén TI', asignado_usuario_id: null })
+        .in('id', seleccionados);
+
+      if (error) throw error;
+
+      lanzarAlerta(`🔓 Lote de ${seleccionados.length} equipos liberado correctamente.`);
+      setSeleccionados([]); // Limpiamos los checkboxes
+      cargarDatos();
+    } catch (err: any) {
+      lanzarAlerta(`❌ Error al liberar lote: ${err.message}`);
+    } finally {
+      setGuardando(false);
+    }
   };
 
   const ejecutarEliminacion = async () => {
@@ -489,6 +527,19 @@ export default function StockActivosPage() {
       lanzarAlerta("🗑️ Elementos eliminados.");
       cargarDatos();
     } catch (err: any) { lanzarAlerta(`⚠️ ${err.message}`); } finally { setGuardando(false); }
+  };
+
+  const ejecutarLiberacionCustodia = async (activoId: number) => {
+    try {
+      setGuardando(true);
+      // Rompemos la asignación activa y regresamos el equipo al stock disponible
+      await supabase.from('asignaciones').update({ fecha_devolucion: new Date().toISOString(), estado_asignacion: 'Devuelto' }).eq('activo_id', activoId).eq('estado_asignacion', 'Activo');
+      const { error } = await supabase.from('activos').update({ estado_actual: 'Disponible en Almacén TI', asignado_usuario_id: null }).eq('id', activoId);
+
+      if (error) throw error;
+      lanzarAlerta("🔄 Custodia liberada. El equipo regresó al Almacén TI.");
+      cargarDatos();
+    } catch (err: any) { lanzarAlerta(`❌ Error al liberar: ${err.message}`); } finally { setGuardando(false); }
   };
 
   const abrirHistorialComentarios = async (id: number, serie: string) => {
@@ -537,7 +588,15 @@ export default function StockActivosPage() {
             📦 Bloque Seleccionado: <code className="bg-blue-600 px-2 py-0.5 rounded text-[10px] ml-1">{seleccionados.length} u</code>
           </span>
           <div className="flex gap-2">
-            {/* 🆕 NUEVO BOTÓN: Restaurar lote completo a Stock Disponible */}
+            {/* 🔓 NUEVO BOTÓN MASIVO: Liberar Custodia de los seleccionados */}
+            <button
+              onClick={ejecutarLiberacionMasiva}
+              disabled={guardando}
+              className="px-3 py-1 bg-sky-600 text-white font-black text-[10px] uppercase rounded-lg hover:bg-sky-700 transition-all active:scale-95 disabled:opacity-50"
+            >
+              Liberar Lote
+            </button>
+
             <button
               onClick={() => setModalConfirmarBaja({ open: true, id: null, masivo: true, restaurar: true })}
               className="px-3 py-1 bg-emerald-600 text-white font-black text-[10px] uppercase rounded-lg hover:bg-emerald-700 transition-all"
@@ -637,11 +696,11 @@ export default function StockActivosPage() {
           {
             header: "Asignación Custodia",
             field: "nombre_completo",
-            render: (a) => a.estado_actual === 'Asignado' ? (
+            // 🛠️ CORREGIDO: Si tiene un nombre de custodio en la base de datos, lo muestra de inmediato sin importar el estado técnico
+            render: (a) => a.nombre_completo ? (
               <div>
-                {/* SE ELIMINÓ EL .split(' ')[0] PARA MOSTRAR EL NOMBRE COMPLETO */}
-                <div className="font-bold text-slate-900">👤 {a.nombre_completo}</div>
-                <div className="text-[9px] text-slate-400">{a.nombre_area}</div>
+                <div className="font-bold text-slate-900 text-xs">👤 {a.nombre_completo}</div>
+                <div className="text-[9px] text-slate-400">{a.nombre_area || 'Área Asignada'}</div>
               </div>
             ) : (
               <span className="text-slate-400 font-bold italic text-[11px]">📦 Almacén TI</span>
@@ -670,10 +729,17 @@ export default function StockActivosPage() {
             className: "text-right w-24",
             render: (a) => {
               const esBaja = a.estado_actual === 'Dado de Baja';
+              const esAsignado = a.estado_actual === 'Asignado';
               return (
                 <div className="flex justify-end gap-3 px-1">
                   <button type="button" onClick={() => abrirHistorialComentarios(a.id, a.serial_id)} className="text-xs" title="Bitácora">💬</button>
                   <button type="button" onClick={() => abrirModalEdicion(a)} className="text-xs" title="Editar">✏️</button>
+
+                  {/* 🔓 NUEVO BOTÓN: Liberar Custodia rápido si el equipo está asignado */}
+                  {esAsignado && (
+                    <button type="button" onClick={() => ejecutarLiberacionCustodia(a.id)} disabled={guardando} className="text-xs hover:scale-110 transition-transform" title="Liberar Custodia (Regresar a Almacén)">🔓</button>
+                  )}
+
                   <button type="button" onClick={() => setModalConfirmarBaja({ open: true, id: a.id, masivo: false, restaurar: esBaja })} className="text-xs" title={esBaja ? "Restaurar Activo" : "Dar de Baja"}>
                     {esBaja ? "🔄" : "📉"}
                   </button>
