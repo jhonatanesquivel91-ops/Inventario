@@ -63,27 +63,48 @@ export default function PaginaReportes() {
     return { urgente: diasRestantes <= 10, vencido: diasRestantes < 0, diasRestantes };
   };
 
-  const cargarDatosAuditoria = async () => {
+const cargarDatosAuditoria = async () => {
     try {
       setLoading(true);
-      const [rAct, rFisica, rArea, rCargo, rCat] = await Promise.all([
+      const [rAct, rFisica, rArea, rCargo, rCat, rUsuarios] = await Promise.all([
         supabase.from('vista_activos_completa').select('*'),
         supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'),
         supabase.from('areas').select('*'),
         supabase.from('cargos').select('*'),
-        supabase.from('categorias_activo').select('*')
+        supabase.from('categorias_activo').select('*'),
+        supabase.from('usuarios').select('id, cargo_id, area_id') // 👈 Traemos también area_id por contingencia
       ]);
 
       const datosVista = rAct.data || [];
       const datosFisicos = rFisica.data || [];
+      const listaAreas = rArea.data || []; // 🚀 CORREGIDO: Ahora sí está perfectamente declarada
+      const listaCargos = rCargo.data || [];
+      const listaUsuarios = rUsuarios.data || [];
 
       const registrosProcesados = datosVista.map(item => {
         const matchingFisico = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
+        
+        // 1. Buscamos los datos del usuario asignado
+        const idUsuario = item.usuario_id || item.asignado_usuario_id;
+        const usuarioData = listaUsuarios.find(u => Number(u.id) === Number(idUsuario));
+        
+        // 2. Buscamos el cargo (Ya funciona)
+        const cargoEncontrado = usuarioData ? listaCargos.find(c => Number(c.id) === Number(usuarioData.cargo_id)) : null;
+
+        // 3. Buscamos el área cruzando el area_id del usuario o del activo
+        const idArea = item.area_id || usuarioData?.area_id;
+        const areaEncontrada = listaAreas.find(a => Number(a.id) === Number(idArea));
+
         return {
           ...item,
           id: item.activo_id,
           tipo_propiedad: matchingFisico?.tipo_propiedad || 'Compra',
-          fecha_fin_alquiler: matchingFisico?.fecha_fin_alquiler || null
+          fecha_fin_alquiler: matchingFisico?.fecha_fin_alquiler || null,
+          
+          // Asignamos los campos calculados sin errores de referencia
+          nombre_area: item.nombre_area || areaEncontrada?.nombre_area || null,
+          color_hex: item.color_hex || areaEncontrada?.color_hex || '#114776',
+          nombre_cargo: item.nombre_cargo || cargoEncontrado?.nombre_cargo || null 
         };
       });
 
@@ -354,6 +375,7 @@ export default function PaginaReportes() {
       field: "nombre_area",
       render: (item: any) => item.nombre_area ? (
         <div className="flex items-center gap-2">
+          {/* 🛠️ Usa el color institucional inyectado o el azul por defecto */}
           <span className="w-2 h-2 rounded-full border shadow-xs" style={{ backgroundColor: item.color_hex || '#114776' }} />
           <span className="px-2 py-0.5 rounded text-white font-black text-[9px] uppercase tracking-wider shadow-xs" style={{ backgroundColor: item.color_hex || '#114776' }}>{item.nombre_area}</span>
         </div>

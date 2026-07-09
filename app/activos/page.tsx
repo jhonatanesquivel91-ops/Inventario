@@ -709,7 +709,21 @@ export default function StockActivosPage() {
           {
             header: "Estado",
             field: "estado_actual",
-            render: (a) => <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border ${a.estado_actual === 'Asignado' ? 'bg-blue-50 border-blue-100 text-slate-600' : a.estado_actual === 'Dado de Baja' ? 'bg-red-50 border-red-100 text-red-700' : 'bg-emerald-50 border-emerald-100 text-emerald-700'}`}>{a.estado_actual.replace('Disponible en ', '')}</span>
+            className: "w-28",
+            render: (a) => {
+              // 1. Si el activo está marcado como Baja, se queda como Baja pase lo que pase
+              if (a.estado_actual === 'Dado de Baja') {
+                return <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border bg-red-50 border-red-100 text-red-700">Baja</span>;
+              }
+              
+              // 2. 🛠️ CORREGIDO: Si tiene un custodio asignado, forzamos a que marque "Asignado" con su estilo azul
+              if (a.nombre_completo || a.asignado_usuario_id) {
+                return <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border bg-blue-50 border-blue-100 text-slate-600">Asignado</span>;
+              }
+
+              // 3. Plan B: Si no tiene dueño, es stock libre en el almacén
+              return <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border bg-emerald-50 border-emerald-100 text-emerald-700">Almacén TI</span>;
+            }
           },
           {
             header: "Fecha Registro",
