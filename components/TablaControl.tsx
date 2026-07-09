@@ -15,6 +15,7 @@ interface TablaControlProps<T> {
   loading?: boolean;
   msgVacio?: string;
   children?: React.ReactNode; // Filtros embebidos
+  onRefresh?: () => void; // 👈 1. PROPIEDAD OPCIONAL PARA REALIZAR EL REFRESH
 }
 
 export function TablaControl<T>({ 
@@ -24,7 +25,8 @@ export function TablaControl<T>({
   columnas, 
   loading, 
   msgVacio = "No se encontraron registros.", 
-  children 
+  children,
+  onRefresh // 👈 2. CAPTURA DE LA PROP
 }: TablaControlProps<T>) {
   
   // --- Estados de Ordenamiento ---
@@ -88,6 +90,19 @@ export function TablaControl<T>({
               {badgeCount}
             </span>
           )}
+          
+          {/* 🔄 3. BOTÓN DE ACTUALIZACIÓN CENTRALIZADO */}
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              title="Refrescar datos de la base de datos"
+              className="p-1 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-40"
+            >
+              {loading ? '⏳' : '🔄'}
+            </button>
+          )}
         </div>
         {children && <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">{children}</div>}
       </div>
@@ -127,7 +142,6 @@ export function TablaControl<T>({
                 <tr key={rowIdx} className="hover:bg-slate-50/40 transition-colors">
                   {columnas.map((col, colIdx) => (
                     <td key={colIdx} className={`px-4 py-2.5 ${col.className || ''}`}>
-                      {/* 🛠️ CORRECCIÓN: Validar si existe renderizador o pintar la propiedad plana del objeto */}
                       {col.render ? col.render(item) : (col.field ? (item as any)[col.field] : '—')}
                     </td>
                   ))}
@@ -138,7 +152,7 @@ export function TablaControl<T>({
         )}
       </div>
 
-      {/* 📄 PIE DE PÁGINA: PAGINACIÓN INTEGRADA Y LIMPIA DE CLASE MUNDIAL */}
+      {/* PIE DE PÁGINA */}
       {!loading && totalFilas > 0 && (
         <div className="px-4 py-2 bg-slate-50/70 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2 flex-shrink-0 text-[11px] font-bold text-slate-500">
           <div className="flex items-center gap-1.5">

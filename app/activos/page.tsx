@@ -121,41 +121,25 @@ export default function StockActivosPage() {
     try {
       setLoading(true);
 
-      // Consultamos todas las tablas maestras de golpe
-      const [rVista, rFisica, rCondiciones, rCategorias, rMarcas, rModelos] = await Promise.all([
-        supabase.from('vista_activos_completa').select('*').order('activo_id', { ascending: false }),
-        supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'),
+      // 1. Consultamos el RPC que ya junta áreas y colores planos en el servidor
+      const { data: dataRpc, error: errorRpc } = await supabase.rpc('obtener_reporte_activos');
+      if (errorRpc) throw errorRpc;
+
+      // 2. Traemos el resto de catálogos para los formularios
+      const [rCondiciones, rCategorias, rMarcas, rModelos] = await Promise.all([
         supabase.from('estados_conservacion').select('*').order('nombre_estado'),
-        supabase.from('categorias_activo').select('*').order('nombre_categoria'), // 👈 CAMBIADO de 'nombre_categoria' a '*'
-        supabase.from('marcas').select('*').order('nombre_marca'), // 👈 Trae marcas físicas
-        supabase.from('modelos').select('*').order('nombre_modelo') // 👈 Trae modelos físicos
+        supabase.from('categorias_activo').select('*').order('nombre_categoria'),
+        supabase.from('marcas').select('*').order('nombre_marca'),
+        supabase.from('modelos').select('*').order('nombre_modelo')
       ]);
 
-      if (rVista.error) throw rVista.error;
-      if (rFisica.error) throw rFisica.error;
       if (rCondiciones.error) throw rCondiciones.error;
 
-      const datosVista = rVista.data || [];
-      const datosFisicos = rFisica.data || [];
-
-      // Fusión de datos extendidos
-      const registrosCombinados = datosVista.map(item => {
-        const coincidenciaFisica = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
-        return {
-          ...item,
-          id: item.activo_id,
-          tipo_propiedad: coincidenciaFisica?.tipo_propiedad || 'Compra',
-          fecha_fin_alquiler: coincidenciaFisica?.fecha_fin_alquiler || null
-        };
-      });
-
-      setActivos(registrosCombinados);
+      // 3. Seteamos la data limpia directamente
+      setActivos(dataRpc || []);
       setCondicionesCatalogo(rCondiciones.data || []);
 
-      // Llenamos los estados con data directa del servidor
-      if (rCategorias.data) {
-        setCategoriasCatalogo(rCategorias.data); // 👈 Asegúrate de pasarle el arreglo completo, NO el .map() de texto plano anterior
-      } // 👈 Guardamos el objeto completo { id, nombre_categoria }
+      if (rCategorias.data) setCategoriasCatalogo(rCategorias.data);
       if (rMarcas.data) setMarcasCatalogo(rMarcas.data);
       if (rModelos.data) setModelosCatalogo(rModelos.data);
 
@@ -165,7 +149,6 @@ export default function StockActivosPage() {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     cargarDatos();
   }, []);
@@ -234,14 +217,15 @@ export default function StockActivosPage() {
   const metricasTI = useMemo(() => {
     return {
       total: activos.length,
-      // 1. En custodia: Tiene un dueño asignado
-      asignados: activos.filter(a => a.nombre_completo || a.asignado_usuario_id).length,
       
-      // 🛠️ 2. Stock Disponible CORREGIDO: Está en almacén Y además NO tiene ningún dueño asignado
-      disponibles: activos.filter(a => a.estado_actual === 'Disponible en Almacén TI' && !a.nombre_completo && !a.asignado_usuario_id).length,
-      
-      // 3. Dados de baja: Su estado operativo es de baja
-      bajas: activos.filter(a => a.estado_actual === 'Dado de Baja').length
+      // 1. En custodia: Tiene un custodio asignado en la BD
+      asignados: activos.filter(a => a.nombre_completo && a.nombre_completo.trim() !== '').length,
+
+      // 2. Stock Disponible: No tiene dueño Y su estado de conservación NO es 'Dado de Baja'
+      disponibles: activos.filter(a => !a.nombre_completo && a.nombre_estado !== 'Dado de Baja').length,
+
+      // 3. Dados de Baja: Su estado de conservación en Postgres es explícitamente 'Dado de Baja'
+      bajas: activos.filter(a => a.nombre_estado === 'Dado de Baja').length
     };
   }, [activos]);
 
@@ -390,20 +374,18 @@ export default function StockActivosPage() {
 
       // 1. Si creó una familia nueva, la insertamos primero en categorias_activo
       if (creandoNuevaFamilia) {
-        const { data: catInsertada, error: errCat } = await supabase
+        const { error: errCat } = await supabase
           .from('categorias_activo')
-          .insert([{ nombre_categoria: categoriaFinal }])
-          .select()
-          .single();
+          .insert([{ nombre_categoria: categoriaFinal }]);
         if (errCat && !errCat.message.includes('duplicate')) throw errCat;
       }
 
-      // Volvemos a consultar la categoría para amarrar su ID real de forma estricta
+      // Volvemos a consultar la categoría de forma segura usando .maybeSingle() para evitar el error 406
       const { data: catActual } = await supabase
         .from('categorias_activo')
         .select('id')
         .eq('nombre_categoria', categoriaFinal)
-        .single();
+        .maybeSingle();
 
       // 2. Si creó una marca nueva, la asociamos directamente al ID de la familia activa
       if (creandoNuevaMarca && catActual) {
@@ -413,12 +395,12 @@ export default function StockActivosPage() {
         if (errMar && !errMar.message.includes('duplicate')) throw errMar;
       }
 
-      // Consultamos el ID real de la marca activa
+      // Consultamos la marca de forma segura
       const { data: marcaActual } = await supabase
         .from('marcas')
         .select('id')
         .eq('nombre_marca', marcaFinal)
-        .single();
+        .maybeSingle();
 
       // 3. Si creó un modelo nuevo, lo asociamos directamente al ID de la marca activa
       if (creandoNuevoModelo && marcaActual) {
@@ -429,7 +411,6 @@ export default function StockActivosPage() {
       }
 
       // --- ENVIAR AL RPC ORIGINAL ---
-      // Tu RPC se ejecutará normalmente usando las cadenas de texto finales limpias
       const estadoCalculado = modalForm.modo === 'alta' ? 'Disponible en Almacén TI' : modalForm.activo.estado_actual;
 
       const payload = {
@@ -443,10 +424,61 @@ export default function StockActivosPage() {
         p_estado_actual: estadoCalculado
       };
 
-      const { data: idGenerado, error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
+      // Guardamos / Actualizamos la entidad base a través del RPC
+      const { data: rpcResponse, error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
       if (rpcError) throw rpcError;
 
-      // ... (El resto de tu lógica para actualizar estado_conservacion_id y tipo_propiedad se mantiene igual)
+      // 🛠️ DESENVOLVIMIENTO SEGURO DEL ID GENERADO
+      let idDesenvuelto = null;
+      if (rpcResponse) {
+        if (Array.isArray(rpcResponse) && rpcResponse[0]) {
+          idDesenvuelto = rpcResponse[0].id || rpcResponse[0];
+        } else if (typeof rpcResponse === 'object') {
+          idDesenvuelto = rpcResponse.id || rpcResponse;
+        } else {
+          idDesenvuelto = rpcResponse;
+        }
+      }
+
+      // 🛟 PLAN DE RESCATE (Jonathan): Si es alta y el RPC devolvió null, rescatamos el ID usando el número de serie único
+      if (modalForm.modo === 'alta' && !idDesenvuelto) {
+        const { data: activoRescatado } = await supabase
+          .from('activos')
+          .select('id')
+          .eq('serial_id', formSerie.trim())
+          .maybeSingle();
+
+        if (activoRescatado) {
+          idDesenvuelto = activoRescatado.id;
+        }
+      }
+
+      // Determinamos el ID real final con el que operaremos
+      const activoIdReal = modalForm.modo === 'alta' ? idDesenvuelto : modalForm.activo.id;
+
+      if (activoIdReal) {
+        // --- ACTUALIZACIÓN DE PROPIEDAD Y ADQUISICIÓN CONTROLADA ---
+        const { error: propiedadError } = await supabase
+          .from('activos')
+          .update({
+            tipo_propiedad: formTipoPropiedad,
+            fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler || null : null
+          })
+          .eq('id', activoIdReal);
+
+        if (propiedadError) throw propiedadError;
+
+        // Actualizamos también el estado de conservación si es necesario
+        const condicionSeleccionadaObj = condicionesCatalogo.find(c => c.nombre_estado === formCondicion);
+        if (condicionSeleccionadaObj) {
+          await supabase
+            .from('activos')
+            .update({ estado_conservacion_id: condicionSeleccionadaObj.id })
+            .eq('id', activoIdReal);
+        }
+      } else {
+        console.warn("⚠️ No se pudo determinar el ID del activo ni con el plan de rescate.");
+      }
 
       // Limpiamos los estados de creación rápida al finalizar con éxito
       setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
@@ -454,12 +486,11 @@ export default function StockActivosPage() {
       setCreandoNuevoModelo(false); setNuevoModeloNombre('');
 
       setModalForm({ open: false, modo: 'alta' });
-      lanzarAlerta("✅ Activo y nuevos parámetros registrados en cascada correctamente.");
+      lanzarAlerta("✅ Activo y parámetros de régimen guardados correctamente.");
       cargarDatos();
     } catch (err: any) {
-      // Validamos si el error es por duplicado de Clave Única en el Número de Serie
       if (err.message?.includes('activos_serial_id_key') || err.details?.includes('already exists')) {
-        lanzarAlerta(`⚠️ El número de serie "${formSerie.trim()}" ya está registrado en el sistema. Ingrese uno diferente.`);
+        lanzarAlerta(`⚠️ El número de serie "${formSerie.trim()}" ya está registrado en el sistema.`);
       } else {
         lanzarAlerta(`❌ Error al guardar parámetros: ${err.message}`);
       }
@@ -467,7 +498,6 @@ export default function StockActivosPage() {
       setGuardando(false);
     }
   };
-
   const ejecutarBajaORestauracion = async () => {
     try {
       setGuardando(true);
@@ -623,7 +653,7 @@ export default function StockActivosPage() {
 
       {/* TABLA PRINCIPAL */}
       <div className="flex-1 min-h-0 overflow-hidden bg-white rounded-xl border flex flex-col">
-        <TablaControl tituloSeccion="Malla General de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} columnas={[
+        <TablaControl tituloSeccion="Malla General de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} onRefresh={cargarDatos} columnas={[
           {
             header: "✓",
             className: "w-12 text-center",
@@ -696,11 +726,27 @@ export default function StockActivosPage() {
           {
             header: "Asignación Custodia",
             field: "nombre_completo",
-            // 🛠️ CORREGIDO: Si tiene un nombre de custodio en la base de datos, lo muestra de inmediato sin importar el estado técnico
             render: (a) => a.nombre_completo ? (
-              <div>
+              <div className="space-y-1.5">
                 <div className="font-bold text-slate-900 text-xs">👤 {a.nombre_completo}</div>
-                <div className="text-[9px] text-slate-400">{a.nombre_area || 'Área Asignada'}</div>
+                {a.nombre_area ? (
+                  <div className="flex items-center gap-1.5">
+                    {/* Círculo indicador con el color de su área corporativa real */}
+                    <span 
+                      className="w-1.5 h-1.5 rounded-full border shadow-xs flex-shrink-0" 
+                      style={{ backgroundColor: a.color_hex || '#114776' }} 
+                    />
+                    {/* Badge dinámico con el color correspondiente */}
+                    <span 
+                      className="px-2 py-0.5 rounded text-white font-black text-[9px] uppercase tracking-wider shadow-xs block w-fit border border-black/5" 
+                      style={{ backgroundColor: a.color_hex || '#114776' }}
+                    >
+                      {a.nombre_area}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-slate-400 font-bold italic text-[10px]">Sin Área Vinculada</span>
+                )}
               </div>
             ) : (
               <span className="text-slate-400 font-bold italic text-[11px]">📦 Almacén TI</span>
