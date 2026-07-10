@@ -63,32 +63,24 @@ export default function PaginaReportes() {
     return { urgente: diasRestantes <= 10, vencido: diasRestantes < 0, diasRestantes };
   };
 
-const cargarDatosAuditoria = async () => {
+  const cargarDatosAuditoria = async () => {
     try {
       setLoading(true);
-      const [rAct, rFisica, rArea, rCargo, rCat, rUsuarios] = await Promise.all([
-        supabase.from('vista_activos_completa').select('*'),
-        supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'),
+      
+      // 1. Llamamos al mismo RPC optimizado que ya funciona en Activos
+      const { data: dataRpc, error: errorRpc } = await supabase.rpc('obtener_reporte_activos');
+      if (errorRpc) throw errorRpc;
+
+      // 2. Traemos el resto de catálogos para los Selects de los filtros externos
+      const [rArea, rCargo, rCat] = await Promise.all([
         supabase.from('areas').select('*'),
         supabase.from('cargos').select('*'),
-        supabase.from('categorias_activo').select('*'),
-        supabase.from('usuarios').select('id, cargo_id, area_id') // 👈 Traemos también area_id por contingencia
+        supabase.from('categorias_activo').select('*')
       ]);
 
-      const datosVista = rAct.data || [];
-      const datosFisicos = rFisica.data || [];
-
-      const registrosProcesados = datosVista.map(item => {
-        const matchingFisico = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
-        return {
-          ...item,
-          id: item.activo_id,
-          tipo_propiedad: matchingFisico?.tipo_propiedad || 'Compra',
-          fecha_fin_alquiler: matchingFisico?.fecha_fin_alquiler || null
-        };
-      });
-
-      setActivos(registrosProcesados);
+      // 3. Seteamos la data limpia y directa de la BD
+      setActivos(dataRpc || []);
+      
       if (rArea.data) setAreas(rArea.data);
       if (rCargo.data) setCargos(rCargo.data);
       if (rCat.data) setCategorias(rCat.data);
@@ -100,7 +92,6 @@ const cargarDatosAuditoria = async () => {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     cargarDatosAuditoria();
   }, []);
@@ -334,12 +325,18 @@ const cargarDatosAuditoria = async () => {
         String(a.nombre_estado || '').toLowerCase().includes(term) ||
         String(a.tipo_propiedad || '').toLowerCase().includes(term) ||
         String(a.nombre_cargo || '').toLowerCase().includes(term) ||
-        String(a.especificaciones || '').toLowerCase().includes(term); // 👈 Se agrega esta validación
-      const cumpleArea = filtroArea === 'Todos' || String(a.nombre_area) === filtroArea;
-      const cumpleCargo = filtroCargo === 'Todos' || String(a.nombre_cargo) === filtroCargo;
+        String(a.especificaciones || '').toLowerCase().includes(term);
+
+      // Agregamos un plan de rescate por si el activo está en almacén y no tiene área/cargo asignado
+      const areaActivo = a.nombre_area || 'Almacén Central TI';
+      const cargoActivo = a.nombre_cargo || 'Ninguno';
+
+      const cumpleArea = filtroArea === 'Todos' || String(areaActivo) === filtroArea;
+      const cumpleCargo = filtroCargo === 'Todos' || String(cargoActivo) === filtroCargo;
       const cumpleCategoria = filtroCategoria === 'Todos' || String(a.categoria) === filtroCategoria;
       const cumpleConservacion = filtroConservacion === 'Todos' || String(a.nombre_estado) === filtroConservacion;
       const cumplePropiedad = filtroPropiedad === 'Todos' || String(a.tipo_propiedad) === filtroPropiedad;
+      
       return cumpleTexto && cumpleArea && cumpleCargo && cumpleCategoria && cumpleConservacion && cumplePropiedad;
     }).sort((a, b) => {
       let valorA = '', valorB = '';
@@ -364,7 +361,7 @@ const cargarDatosAuditoria = async () => {
   const columnasConfig: any[] = useMemo(() => [
     {
       // Quitamos el onClick manual y las flechas nativas del archivo reportes
-      header: "Área Asignada", 
+      header: "Área Asignada",
       field: "nombre_area",
       render: (item: any) => item.nombre_area ? (
         <div className="flex items-center gap-2">
