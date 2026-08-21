@@ -27,6 +27,8 @@ interface TablaControlProps<T> {
   idDestacado?: string | number | null;
   /** Campo que identifica cada fila. Por defecto `id`. */
   campoId?: string;
+  /** Si se pasa, aparece un botón para recargar los datos. */
+  onRefresh?: () => void;
 }
 
 export function TablaControl<T>({ 
@@ -38,7 +40,8 @@ export function TablaControl<T>({
   msgVacio = "No se encontraron registros.", 
   children,
   idDestacado = null,
-  campoId = 'id'
+  campoId = 'id',
+  onRefresh
 }: TablaControlProps<T>) {
   
   // --- Estados de Ordenamiento ---
@@ -122,6 +125,19 @@ export function TablaControl<T>({
             <span className="bg-slate-200/80 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full">
               {badgeCount}
             </span>
+          )}
+          
+          {/* 🔄 3. BOTÓN DE ACTUALIZACIÓN CENTRALIZADO */}
+          {onRefresh && (
+            <button
+              type="button"
+              onClick={onRefresh}
+              disabled={loading}
+              title="Refrescar datos de la base de datos"
+              className="p-1 bg-white hover:bg-slate-100 text-slate-500 hover:text-slate-800 border border-slate-200 rounded-lg shadow-sm transition-all active:scale-95 disabled:opacity-40"
+            >
+              {loading ? '⏳' : '🔄'}
+            </button>
           )}
         </div>
         {children && <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">{children}</div>}
@@ -226,7 +242,6 @@ export function TablaControl<T>({
                 >
                   {columnas.map((col, colIdx) => (
                     <td key={colIdx} className={`px-4 py-2.5 ${col.className || ''}`}>
-                      {/* 🛠️ CORRECCIÓN: Validar si existe renderizador o pintar la propiedad plana del objeto */}
                       {col.render ? col.render(item) : (col.field ? (item as any)[col.field] : '—')}
                     </td>
                   ))}
@@ -239,7 +254,7 @@ export function TablaControl<T>({
         )}
       </div>
 
-      {/* 📄 PIE DE PÁGINA: PAGINACIÓN INTEGRADA Y LIMPIA DE CLASE MUNDIAL */}
+      {/* PIE DE PÁGINA */}
       {!loading && totalFilas > 0 && (
         <div className="px-3 sm:px-4 py-2 bg-slate-50/70 border-t border-slate-200 flex items-center justify-between gap-2 flex-shrink-0 text-[11px] font-bold text-slate-500">
           <div className="flex items-center gap-1.5">

@@ -66,62 +66,35 @@ export default function PaginaReportes() {
     return { urgente: diasRestantes <= 10, vencido: diasRestantes < 0, diasRestantes };
   };
 
-const cargarDatosAuditoria = async () => {
+  const cargarDatosAuditoria = async () => {
     try {
       setLoading(true);
-      const [rAct, rFisica, rArea, rCargo, rCat, rUsuarios] = await Promise.all([
-        supabase.from('vista_activos_completa').select('*'),
-        supabase.from('activos').select('id, tipo_propiedad, fecha_fin_alquiler'),
+      
+      // 1. Llamamos al mismo RPC optimizado que ya funciona en Activos
+      const { data: dataRpc, error: errorRpc } = await supabase.rpc('obtener_reporte_activos');
+      if (errorRpc) throw errorRpc;
+
+      // 2. Traemos el resto de catálogos para los Selects de los filtros externos
+      const [rArea, rCargo, rCat] = await Promise.all([
         supabase.from('areas').select('*'),
         supabase.from('cargos').select('*'),
-        supabase.from('categorias_activo').select('*'),
-        supabase.from('usuarios').select('id, cargo_id, area_id') // 👈 Traemos también area_id por contingencia
+        supabase.from('categorias_activo').select('*')
       ]);
 
-      const datosVista = rAct.data || [];
-      const datosFisicos = rFisica.data || [];
-      const listaAreas = rArea.data || []; // 🚀 CORREGIDO: Ahora sí está perfectamente declarada
-      const listaCargos = rCargo.data || [];
-      const listaUsuarios = rUsuarios.data || [];
-
-      const registrosProcesados = datosVista.map(item => {
-        const matchingFisico = datosFisicos.find(f => Number(f.id) === Number(item.activo_id));
-        
-        // 1. Buscamos los datos del usuario asignado
-        const idUsuario = item.usuario_id || item.asignado_usuario_id;
-        const usuarioData = listaUsuarios.find(u => Number(u.id) === Number(idUsuario));
-        
-        // 2. Buscamos el cargo (Ya funciona)
-        const cargoEncontrado = usuarioData ? listaCargos.find(c => Number(c.id) === Number(usuarioData.cargo_id)) : null;
-
-        // 3. Buscamos el área cruzando el area_id del usuario o del activo
-        const idArea = item.area_id || usuarioData?.area_id;
-        const areaEncontrada = listaAreas.find(a => Number(a.id) === Number(idArea));
-
-        return {
-          ...item,
-          id: item.activo_id,
-          tipo_propiedad: matchingFisico?.tipo_propiedad || 'Compra',
-          fecha_fin_alquiler: matchingFisico?.fecha_fin_alquiler || null,
-          
-          // Asignamos los campos calculados sin errores de referencia
-          nombre_area: item.nombre_area || areaEncontrada?.nombre_area || null,
-          color_hex: item.color_hex || areaEncontrada?.color_hex || '#114776',
-          nombre_cargo: item.nombre_cargo || cargoEncontrado?.nombre_cargo || null 
-        };
-      });
-
-      setActivos(registrosProcesados);
+      // 3. Seteamos la data limpia y directa de la BD
+      setActivos(dataRpc || []);
+      
       if (rArea.data) setAreas(rArea.data);
       if (rCargo.data) setCargos(rCargo.data);
       if (rCat.data) setCategorias(rCat.data);
+
     } catch (err: any) {
-      console.error("Error cargando auditoría:", err.message);
+      console.error("Error cargando auditoría mediante RPC:", err.message);
+      alert(`❌ Error al sincronizar con la base de datos: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     cargarDatosAuditoria();
   }, []);
@@ -180,7 +153,7 @@ const cargarDatosAuditoria = async () => {
     setInfConclusiones('');
     setInfRecomendaciones('');
     setModalInforme({ open: true, activo: item });
-    
+
     // Forzamos la carga inmediata de la bitácora histórica de este activo
     await cargarHistorialComentarios(item.id);
   };
@@ -227,12 +200,12 @@ const cargarDatosAuditoria = async () => {
 
     doc.setFont("helvetica", "bold"); doc.setFontSize(13);
     doc.text(`INFORME TÉCNICO N.º 000${act.id || '101'}`, 20, 25);
-    
+
     doc.setFontSize(10); doc.text("ASUNTO:", 20, 35);
     doc.setFont("helvetica", "normal");
     const asuntoLineas = doc.splitTextToSize(infAsunto, 150);
     doc.text(asuntoLineas, 40, 35);
-    
+
     const yOffsetFecha = 35 + (asuntoLineas.length * 5);
     doc.setFont("helvetica", "bold"); doc.text("FECHA:", 20, yOffsetFecha);
     doc.setFont("helvetica", "normal"); doc.text(fechaHoy, 40, yOffsetFecha);
@@ -328,7 +301,7 @@ const cargarDatosAuditoria = async () => {
           'Fin Contrato Alquiler': a.fecha_fin_alquiler ? new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE') : 'N/A',
           'Condición Física': a.nombre_estado || 'Excelente',
           'Especificaciones': a.especificaciones || 'Sin detalles',
-          'Historial de Observaciones': celdaComentarios, 
+          'Historial de Observaciones': celdaComentarios,
           'Fecha Registro': a.fecha_registro ? new Date(a.fecha_registro).toLocaleDateString('es-PE') : new Date().toLocaleDateString('es-PE')
         };
       });
@@ -450,7 +423,6 @@ const cargarDatosAuditoria = async () => {
           'Estado': p.estado_prestamo,
           'Situacion': vencido ? 'VENCIDO' : pendiente ? 'Pendiente' : 'Cerrado',
           'Devolucion Estimada': dia(p.fecha_devolucion_estimada),
-          'Devolucion Real': dia(p.fecha_devolucion_real),
           'Observaciones': p.observaciones || '',
         };
       }));
@@ -517,7 +489,7 @@ const cargarDatosAuditoria = async () => {
   };
 
   const manejarSort = (criterio: CriterioSort) => {
-    if (criterioSort === criterio) { setDireccionSort(direccionSort === 'asc' ? 'desc' : 'asc'); } 
+    if (criterioSort === criterio) { setDireccionSort(direccionSort === 'asc' ? 'desc' : 'asc'); }
     else { setCriterioSort(criterio); setDireccionSort('asc'); }
   };
 
@@ -530,11 +502,17 @@ const cargarDatosAuditoria = async () => {
 
     return activos.filter(a => {
       const cumpleTexto = coincideTexto(a);
-      const cumpleArea = filtroArea === 'Todos' || String(a.nombre_area) === filtroArea;
-      const cumpleCargo = filtroCargo === 'Todos' || String(a.nombre_cargo) === filtroCargo;
+
+      // Plan de rescate: un activo en almacén no tiene área ni cargo asignado.
+      const areaActivo = a.nombre_area || 'Almacén Central TI';
+      const cargoActivo = a.nombre_cargo || 'Ninguno';
+
+      const cumpleArea = filtroArea === 'Todos' || String(areaActivo) === filtroArea;
+      const cumpleCargo = filtroCargo === 'Todos' || String(cargoActivo) === filtroCargo;
       const cumpleCategoria = filtroCategoria === 'Todos' || String(a.categoria) === filtroCategoria;
       const cumpleConservacion = filtroConservacion === 'Todos' || String(a.nombre_estado) === filtroConservacion;
       const cumplePropiedad = filtroPropiedad === 'Todos' || String(a.tipo_propiedad) === filtroPropiedad;
+      
       return cumpleTexto && cumpleArea && cumpleCargo && cumpleCategoria && cumpleConservacion && cumplePropiedad;
     }).sort((a, b) => {
       let valorA = '', valorB = '';
@@ -558,7 +536,8 @@ const cargarDatosAuditoria = async () => {
 
   const columnasConfig: any[] = useMemo(() => [
     {
-      header: <span onClick={() => manejarSort('area')} className="cursor-pointer select-none block w-full h-full">Área Asignada{renderFlechaSort('area')}</span>,
+      // Quitamos el onClick manual y las flechas nativas del archivo reportes
+      header: "Área Asignada",
       field: "nombre_area",
       render: (item: any) => item.nombre_area ? (
         <div className="flex items-center gap-2">
@@ -569,12 +548,12 @@ const cargarDatosAuditoria = async () => {
       ) : <span className="text-slate-400 font-bold italic">Almacén Central TI</span>
     },
     {
-      header: <span onClick={() => manejarSort('cargo')} className="cursor-pointer select-none block w-full h-full">Cargo Perfil{renderFlechaSort('cargo')}</span>,
+      header: "Cargo Perfil",
       field: "nombre_cargo",
       render: (item: any) => item.nombre_cargo ? <span className="font-bold text-slate-700 text-xs">💼 {item.nombre_cargo}</span> : <span className="text-slate-400 italic text-[11px]">Ninguno</span>
     },
     {
-      header: <span onClick={() => manejarSort('persona')} className="cursor-pointer select-none block w-full h-full">Colaborador / Custodio{renderFlechaSort('persona')}</span>,
+      header: "Colaborador / Custodio",
       field: "nombre_completo",
       render: (item: any) => item.nombre_completo ? (
         <div>
@@ -606,7 +585,7 @@ const cargarDatosAuditoria = async () => {
       ) : <span className="text-slate-400 italic text-[10px]">Sin detalles técnicos</span>
     },
     {
-      header: <span onClick={() => manejarSort('propiedad')} className="cursor-pointer select-none block w-full h-full">Régimen{renderFlechaSort('propiedad')}</span>,
+      header: "Régimen",
       field: "tipo_propiedad",
       render: (item: any) => {
         const esAlquiler = item.tipo_propiedad === 'Alquiler';
@@ -638,7 +617,7 @@ const cargarDatosAuditoria = async () => {
       )
     },
     {
-      header: <span onClick={() => manejarSort('conservacion')} className="cursor-pointer select-none block w-full h-full">Condición Física{renderFlechaSort('conservacion')}</span>,
+      header: "Condición Física",
       field: "nombre_estado",
       className: "w-36 text-center",
       render: (item: any) => (
@@ -655,7 +634,7 @@ const cargarDatosAuditoria = async () => {
         </div>
       )
     }
-  ], [activos, criterioSort, direccionSort, listaComentarios]);
+  ], []); // Simplificado sin dependencias extras en el useMemo
 
   return (
     <ContenedorVista titulo="📊 Consola Analítica y Auditoría de Stock" subtitulo="Filtre, ordene y genere reportes técnicos globales." badgeStatus="online">
@@ -707,13 +686,13 @@ const cargarDatosAuditoria = async () => {
         </div>
 
         <div className="flex-1 flex flex-col min-h-0 bg-white rounded-xl border overflow-hidden">
-          <TablaControl tituloSeccion="Bitácora y Malla de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} columnas={columnasConfig} idDestacado={idDestacado} />
+          <TablaControl tituloSeccion="Bitácora y Malla de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} columnas={columnasConfig} idDestacado={idDestacado} onRefresh={cargarDatosAuditoria} />
         </div>
       </div>
 
       {/* 📋 MODAL DE CONFIGURACIÓN DE INFORME TÉCNICO CON DOS PESTAÑAS INTEGRADAS */}
       <ModalBase isOpen={modalInforme.open} onClose={() => setModalInforme({ open: false, activo: null })} titulo="📋 Consola Unificada de Informes Técnicos TI">
-        
+
         {/* Selector de Pestañas */}
         <div className="flex bg-slate-100 p-1 rounded-xl border text-[11px] font-black gap-1 mb-3">
           <button type="button" onClick={() => setTabInforme('ia')} className={`flex-1 py-2 rounded-lg transition-all ${tabInforme === 'ia' ? 'bg-white shadow-sm text-blue-900' : 'text-slate-500'}`}>✨ Redacción Inteligente (IA)</button>
@@ -727,21 +706,21 @@ const cargarDatosAuditoria = async () => {
               <span className="text-blue-900 block font-black uppercase text-[10px]">Análisis Contextual de Bitácoras</span>
               <p className="text-slate-400 font-medium mt-0.5">La IA escaneará los datos del hardware junto a las <code className="bg-blue-100 text-blue-800 px-1 rounded font-bold">{listaComentarios.length} notas</code> históricas registradas en la base de datos de este bien.</p>
             </div>
-            
+
             <div>
               <label className="block text-[10px] uppercase text-slate-400 mb-1">Anotación o Contexto Adicional (Opcional)</label>
-              <textarea 
-                value={contextoAdicional} 
-                onChange={(e) => setContextoAdicional(e.target.value)} 
-                placeholder="Ej: El custodio indica urgencia por cierre de ciclo / Se detectó daño accidental por derrame..." 
-                rows={3} 
+              <textarea
+                value={contextoAdicional}
+                onChange={(e) => setContextoAdicional(e.target.value)}
+                placeholder="Ej: El custodio indica urgencia por cierre de ciclo / Se detectó daño accidental por derrame..."
+                rows={3}
                 className="w-full p-2 border border-slate-200 bg-white rounded-lg font-medium text-slate-800 outline-none"
               />
             </div>
 
-            <button 
-              type="button" 
-              onClick={procesarInformeConIA} 
+            <button
+              type="button"
+              onClick={procesarInformeConIA}
               disabled={analizandoIA}
               style={{ backgroundColor: 'var(--color-upeu)' }}
               className="w-full py-3 text-white uppercase font-black rounded-xl shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-2"
@@ -770,7 +749,7 @@ const cargarDatosAuditoria = async () => {
               <label className="block text-[10px] uppercase text-slate-400 mb-1">VI. Recomendaciones TI</label>
               <textarea value={infRecomendaciones} onChange={(e) => setInfRecomendaciones(e.target.value)} rows={3} className="w-full p-2 border rounded-lg bg-slate-50 text-slate-700 outline-none leading-normal" required />
             </div>
-            
+
             <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white uppercase tracking-wider font-black rounded-xl shadow-md transition-all">
               💾 Descargar Informe PDF Estructurado
             </button>

@@ -374,7 +374,7 @@ export default function FichaActivo() {
                       </span>
                     ) : (
                       <span className="text-slate-500">
-                        Devuelto {fecha(p.fecha_devolucion_real)}
+                        Devuelto
                       </span>
                     )}
                   </div>

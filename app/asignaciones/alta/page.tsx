@@ -75,7 +75,7 @@ export default function AsignacionExpress() {
       setLoading(true);
       const [rUsr, rAct, rArea, rCat, rMar, rMod, rCond] = await Promise.all([
         supabase.from('usuarios').select('*, areas(*), cargos(*)').order('nombre_completo'),
-        supabase.from('vista_activos_completa').select('*').eq('estado_actual', 'Disponible en Almacén TI'),
+        supabase.from('vista_activos_completa').select('*').neq('estado_actual', 'Dado de Baja').order('asignado_usuario_id', { nullsFirst: true }),
         supabase.from('areas').select('*').order('nombre_area'),
         supabase.from('categorias_activo').select('*').order('nombre_categoria'),
         supabase.from('marcas').select('*').order('nombre_marca'),
@@ -104,6 +104,21 @@ export default function AsignacionExpress() {
     }
   };
 
+  const limpiarFormulario = () => {
+    setFormTipo('');
+    setFormMarca('');
+    setFormModelo('');
+    setFormSerie('');
+    setFormCaf('');
+    setFormSpecs('');
+    setFormCondicion('Excelente');
+    setFormTipoPropiedad('Compra');
+    setFormFechaFinAlquiler('');
+    setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
+    setCreandoNuevaMarca(false); setNuevaMarcaNombre('');
+    setCreandoNuevoModelo(false); setNuevoModeloNombre('');
+  };
+  
   // Función para guardar desde Asignación Express
   const manejarGuardarOActualizar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,12 +132,12 @@ export default function AsignacionExpress() {
       if (creandoNuevaFamilia) {
         await supabase.from('categorias_activo').insert([{ nombre_categoria: categoriaFinal }]);
       }
-      const { data: catActual } = await supabase.from('categorias_activo').select('id').eq('nombre_categoria', categoriaFinal).single();
+      const { data: catActual } = await supabase.from('categorias_activo').select('id').eq('nombre_categoria', categoriaFinal).maybeSingle();
 
       if (creandoNuevaMarca && catActual) {
         await supabase.from('marcas').insert([{ nombre_marca: marcaFinal, categoria_id: catActual.id }]);
       }
-      const { data: marcaActual } = await supabase.from('marcas').select('id').eq('nombre_marca', marcaFinal).single();
+      const { data: marcaActual } = await supabase.from('marcas').select('id').eq('nombre_marca', marcaFinal).maybeSingle();
 
       if (creandoNuevoModelo && marcaActual) {
         await supabase.from('modelos').insert([{ nombre_modelo: modeloFinal, marca_id: marcaActual.id }]);
@@ -140,10 +155,57 @@ export default function AsignacionExpress() {
         ...(soportaLinea ? { p_linea_telefonica: formLinea.trim() || null } : {})
       };
 
-      const { error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
+      const { data: rpcResponse, error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
       if (rpcError) throw rpcError;
 
-      lanzarAlerta("✅ Activo creado exitosamente en el Almacén.");
+      // 🛠️ DESENVOLVIMIENTO SEGURO DEL ID GENERADO
+      let idDesenvuelto = null;
+      if (rpcResponse) {
+        if (Array.isArray(rpcResponse) && rpcResponse[0]) {
+          idDesenvuelto = rpcResponse[0].id || rpcResponse[0];
+        } else if (typeof rpcResponse === 'object') {
+          idDesenvuelto = rpcResponse.id || rpcResponse;
+        } else {
+          idDesenvuelto = rpcResponse;
+        }
+      }
+
+      // 🛟 PLAN DE RESCATE (Jonathan): Si el RPC devolvió null, rescatamos el ID usando el número de serie único
+      if (!idDesenvuelto) {
+        const { data: activoRescatado } = await supabase
+          .from('activos')
+          .select('id')
+          .eq('serial_id', formSerie.trim())
+          .maybeSingle();
+        
+        if (activoRescatado) {
+          idDesenvuelto = activoRescatado.id;
+        }
+      }
+
+      // Si logramos capturar el ID del nuevo activo, guardamos el Régimen de Propiedad
+      if (idDesenvuelto) {
+        const { error: propiedadError } = await supabase
+          .from('activos')
+          .update({
+            tipo_propiedad: formTipoPropiedad,
+            fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler || null : null
+          })
+          .eq('id', idDesenvuelto);
+
+        if (propiedadError) throw propiedadError;
+
+        // Opcional: Guardar también el estado de conservación inicial
+        const condicionSeleccionadaObj = condicionesCatalogo.find(c => c.nombre_estado === formCondicion);
+        if (condicionSeleccionadaObj) {
+          await supabase
+            .from('activos')
+            .update({ estado_conservacion_id: condicionSeleccionadaObj.id })
+            .eq('id', idDesenvuelto);
+        }
+      }
+
+      lanzarAlerta("✅ Activo creado exitosamente en el Almacén con su régimen.");
       setModalFormOpen(false);
       cargarInformacionBase();
     } catch (err: any) {
@@ -201,10 +263,19 @@ export default function AsignacionExpress() {
     if (!usuarioFocus) return lanzarAlerta("⚠️ Fije un beneficiario primero.");
     try {
       setGuardando(true);
+
+      // Terminar custodia anterior si el activo ya estaba asignado a alguien
+      await supabase
+        .from('asignaciones')
+        .update({ fecha_devolucion: new Date().toISOString(), estado_asignacion: 'Devuelto' })
+        .eq('activo_id', activoId)
+        .eq('estado_asignacion', 'Activo');
+
+      // Crear nueva asignación y actualizar el activo
       await supabase.from('asignaciones').insert([{ activo_id: activoId, usuario_id: usuarioFocus.id, estado_asignacion: 'Activo', text_asignacion: 'Asignacion Express' }]);
       await supabase.from('activos').update({ estado_actual: 'Asignado', asignado_usuario_id: usuarioFocus.id }).eq('id', activoId);
 
-      lanzarAlerta("✅ Dispositivo asignado correctamente.");
+      lanzarAlerta("✅ Dispositivo asignado correctamente y custodia actualizada.");
       await cargarInformacionBase();
       await cargarCustodiaPersona(usuarioFocus.id);
     } catch (err: any) { lanzarAlerta(`❌ Error: ${err.message}`); } finally { setGuardando(false); }
@@ -267,7 +338,7 @@ export default function AsignacionExpress() {
           {/* SELECTOR CON BUSCADOR ESTÁTICO DE ANCHO COMPLETO */}
           <div className="w-full sm:w-3/4 flex flex-col space-y-1 relative">
             <span className="font-bold text-slate-400 uppercase text-[9px] tracking-wider">Escribe Nombre o DNI para Fijar Colaborador:</span>
-            
+
             <div className="relative w-full">
               <input
                 type="text"
@@ -371,7 +442,7 @@ export default function AsignacionExpress() {
           <div className="xl:col-span-2 h-full min-h-0 flex flex-col gap-3">
             <div className="flex-1 min-h-0">
             <TablaControl
-              tituloSeccion={usuarioFocus ? `Custodia de ${usuarioFocus.nombre_completo.split(' ')[0]}` : "Custodia Actual"}
+              tituloSeccion={usuarioFocus ? `Custodia de ${usuarioFocus.nombre_completo} (${usuarioFocus.areas?.nombre_area || 'Sin Área'})` : "Custodia Actual"}
               badgeCount={usuarioFocus ? equiposCustodia.length : 0}
               data={usuarioFocus ? equiposCustodia : []}
               loading={loadingCustodia}
@@ -404,7 +475,7 @@ export default function AsignacionExpress() {
                 },
                 {
                   header: "Patrimonio CAF",
-                  field: "caf", // Habilita Sort
+                  field: "caf",
                   render: (eq: any) => <code className="bg-slate-100 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-700 text-[10px]">{eq.caf || '—'}</code>
                 },
                 {
@@ -485,14 +556,15 @@ export default function AsignacionExpress() {
           {/* COLUMNA 3, 4 & 5: EL ALMACÉN TI CON FILTROS INTERNOS Y SORT */}
           <div className="xl:col-span-3 h-full min-h-0">
             <TablaControl
-              tituloSeccion="Inventario Disponible en Almacén TI"
+              tituloSeccion="Inventario Global de Activos TI"
               badgeCount={activosFiltrados.length}
               data={activosFiltrados}
               loading={loading}
+              onRefresh={cargarInformacionBase}
               columnas={[
                 {
                   header: "Categoría / Modelo",
-                  field: "categoria", // Habilita Sort al hacer clic
+                  field: "categoria",
                   render: (a: any) => (
                     <div>
                       <span className="font-black text-blue-900">[{a.categoria}]</span>
@@ -501,29 +573,66 @@ export default function AsignacionExpress() {
                   )
                 },
                 {
-                  header: "Número de Serie",
-                  field: "serial_id", // Habilita Sort
-                  render: (a: any) => <code className="bg-slate-50 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-600 text-[10px]">{a.serial_id}</code>
+                  header: "Identificadores",
+                  field: "serial_id",
+                  render: (a: any) => (
+                    <div className="flex flex-col space-y-0.5">
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase mr-1">S/N:</span>
+                        <code className="bg-slate-50 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-600 text-[10px]">{a.serial_id}</code>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 font-bold uppercase mr-1">CAF:</span>
+                        <span className="font-mono font-bold text-slate-500 text-[10px]">{a.caf || '—'}</span>
+                      </div>
+                    </div>
+                  )
                 },
                 {
-                  header: "Código CAF",
-                  field: "caf", // Habilita Sort
-                  render: (a: any) => <span className="font-mono font-bold text-slate-500 text-[10px]">{a.caf || '—'}</span>
+                  header: "Custodio / Estado",
+                  field: "estado_actual",
+                  render: (a: any) => {
+                    const esLibre = !a.asignado_usuario_id;
+                    
+                    // Cruce en el frontend: Buscamos al usuario en la lista local por su ID
+                    const usuarioCustodio = !esLibre 
+                      ? usuarios.find(u => String(u.id) === String(a.asignado_usuario_id))
+                      : null;
+
+                    return (
+                      <div className="flex flex-col">
+                        <span className={`text-[10px] font-bold ${esLibre ? 'text-emerald-600' : 'text-amber-600'}`}>
+                          {esLibre ? '🟢 Disponible en TI' : ' Custodiado'}
+                        </span>
+                        {!esLibre && (
+                          <span 
+                            className="text-[9px] text-slate-600 font-black max-w-[180px] truncate mt-0.5" 
+                            title={usuarioCustodio ? usuarioCustodio.nombre_completo : `ID: ${a.asignado_usuario_id}`}
+                          >
+                            👤 {usuarioCustodio ? usuarioCustodio.nombre_completo : `Cargando custodio (ID: ${a.asignado_usuario_id})...`}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  }
                 },
                 {
                   header: "Acción",
                   className: "text-right w-20",
-                  render: (a: any) => (
-                    <button
-                      type="button"
-                      onClick={() => ejecutarAsignacion(a.id)}
-                      disabled={guardando || !usuarioFocus}
-                      className="px-2.5 py-1 text-white text-[10px] font-bold rounded-lg shadow disabled:opacity-30 transition-all active:scale-95"
-                      style={{ backgroundColor: 'var(--color-upeu)' }}
-                    >
-                      Asignar
-                    </button>
-                  )
+                  render: (a: any) => {
+                    const esMismoUsuario = usuarioFocus && a.asignado_usuario_id === usuarioFocus.id;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => ejecutarAsignacion(a.id)}
+                        disabled={guardando || !usuarioFocus || esMismoUsuario}
+                        className="px-2.5 py-1 text-white text-[10px] font-bold rounded-lg shadow disabled:opacity-30 transition-all active:scale-95"
+                        style={{ backgroundColor: 'var(--color-upeu)' }}
+                      >
+                        {a.asignado_usuario_id ? 'Reasignar' : 'Asignar'}
+                      </button>
+                    );
+                  }
                 }
               ]}
             >
@@ -546,10 +655,10 @@ export default function AsignacionExpress() {
               <button
                 type="button"
                 onClick={() => {
-                  setFormTipo(''); setFormMarca(''); setFormModelo(''); setFormSerie(''); setFormCaf(''); setFormSpecs('');
+                  limpiarFormulario(); // 🧽 Limpia todo rastro del registro anterior
                   setModalFormOpen(true);
                 }}
-                className="p-1.5 bg-blue-800 text-white font-black text-[11px] uppercase rounded-md shadow-sm transition-all"
+                className="p-1.5 text-white font-black text-[11px] uppercase rounded-md shadow-sm transition-all"
                 style={{ backgroundColor: 'var(--color-upeu)' }}
               >
                 ➕ Crear Activo

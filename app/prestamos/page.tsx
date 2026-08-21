@@ -142,7 +142,6 @@ export default function ModuloPrestamos() {
     } catch (err: any) { lanzarAlerta(`❌ Error: ${err.message}`); } finally { setGuardando(false); }
   };
 
-  // --- CONTROLADOR UNIFICADO DE PROCESOS SEGUROS POST-CONFIRMACIÓN ---
   const procesarAccionSegura = async () => {
     if (!modalSeguridad.id || !modalSeguridad.tipo) return;
     try {
@@ -150,12 +149,22 @@ export default function ModuloPrestamos() {
       const targetId = modalSeguridad.id;
 
       if (modalSeguridad.tipo === 'recibir') {
-        const { error } = await supabase.from('prestamos').update({ estado_prestamo: 'Devuelto', fecha_devolucion_real: new Date().toISOString() }).eq('id', targetId);
+        // 🧽 Removida la columna inexistente para evitar el Bad Request
+        const { error } = await supabase
+          .from('prestamos')
+          .update({ estado_prestamo: 'Devuelto' }) 
+          .eq('id', targetId);
+          
         if (error) throw error;
         lanzarAlerta("✅ Equipo recibido en almacén.");
       }
       else if (modalSeguridad.tipo === 'revertir') {
-        const { error } = await supabase.from('prestamos').update({ estado_prestamo: 'Pendiente', fecha_devolucion_real: null }).eq('id', targetId);
+        // 🧽 Removida la columna inexistente aquí también
+        const { error } = await supabase
+          .from('prestamos')
+          .update({ estado_prestamo: 'Pendiente' }) 
+          .eq('id', targetId);
+          
         if (error) throw error;
         lanzarAlerta("🔄 Estado de retén revertido a Pendiente.");
       }
