@@ -2,8 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { crearFiltro } from '@/lib/busqueda';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
+import { useDestacar } from '@/lib/useDestacar';
 import { ModalBase } from '@/components/ModalBase';
 import { BitacoraNotas } from '@/components/BitacoraNotas';
 import * as XLSX from 'xlsx';
@@ -19,6 +21,7 @@ interface ModalComentariosState {
 }
 
 export default function PaginaReportes() {
+  const idDestacado = useDestacar();
   const [loading, setLoading] = useState(false);
 
   const [activos, setActivos] = useState<any[]>([]);
@@ -330,8 +333,187 @@ const cargarDatosAuditoria = async () => {
         };
       });
       const wb = XLSX.utils.book_new(); const ws = XLSX.utils.json_to_sheet(dataPlana);
-      XLSX.utils.book_append_sheet(wb, ws, "Inventario_Reportes"); XLSX.writeFile(wb, `Reporte_TI_Posgrado_Filtros.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, "Reporte de Oficina"); XLSX.writeFile(wb, `Reporte_de_Oficina_${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (err: any) { alert(`❌ Error: ${err.message}`); } finally { setLoading(false); }
+  };
+
+  /**
+   * Reporte General Extenso.
+   *
+   * A diferencia del Reporte de Oficina, este IGNORA los filtros de pantalla y
+   * baja todo el sistema en un libro de varias hojas: activos, historial de
+   * custodia, prestamos, licencias, personal y bitacora. Es el respaldo
+   * completo, para auditoria o para entregar a Direccion.
+   */
+  const exportarReporteGeneralExtenso = async () => {
+    try {
+      setLoading(true);
+
+      const [resActivos, resAsign, resPrest, resObs, resUsuarios] = await Promise.all([
+        supabase.from('vista_activos_completa').select('*').order('categoria'),
+        supabase.from('asignaciones').select('*, usuarios(nombre_completo, dni)').order('id', { ascending: false }),
+        supabase.from('prestamos').select('*').order('id', { ascending: false }),
+        supabase.from('observaciones_activos').select('*').order('fecha_registro', { ascending: false }),
+        supabase.from('usuarios').select('*, areas(nombre_area), cargos(nombre_cargo)').order('nombre_completo'),
+      ]);
+
+      // Las licencias pueden no existir si no se ejecuto su migracion.
+      const resLic = await supabase.from('vista_licencias_completa').select('*').order('nombre_servicio');
+      const resLicAsig = await supabase
+        .from('licencias_asignaciones')
+        .select('*, licencias(nombre_servicio), usuarios(nombre_completo, dni)');
+
+      const activos = resActivos.data || [];
+      const asignaciones = resAsign.data || [];
+      const prestamos = resPrest.data || [];
+      const observaciones = resObs.data || [];
+      const usuarios = resUsuarios.data || [];
+      const licencias = resLic.error ? [] : (resLic.data || []);
+      const licAsignaciones = resLicAsig.error ? [] : (resLicAsig.data || []);
+
+      const dia = (v: any) =>
+        v ? new Date(String(v).length === 10 ? `${v}T00:00:00` : v).toLocaleDateString('es-PE') : '';
+
+      const wb = XLSX.utils.book_new();
+      const agregar = (nombre: string, filas: any[]) => {
+        XLSX.utils.book_append_sheet(
+          wb,
+          XLSX.utils.json_to_sheet(filas.length ? filas : [{ 'Sin registros': '' }]),
+          nombre
+        );
+      };
+
+      // 1. Resumen ejecutivo
+      const enCustodia = activos.filter((a: any) => a.nombre_completo).length;
+      agregar('Resumen', [
+        { Indicador: 'Total de activos', Valor: activos.length },
+        { Indicador: 'En custodia de personal', Valor: enCustodia },
+        { Indicador: 'En almacen', Valor: activos.length - enCustodia },
+        { Indicador: 'Equipos en alquiler', Valor: activos.filter((a: any) => a.tipo_propiedad === 'Alquiler').length },
+        { Indicador: 'Prestamos pendientes', Valor: prestamos.filter((p: any) => String(p.estado_prestamo || '').trim() === 'Pendiente').length },
+        { Indicador: 'Colaboradores registrados', Valor: usuarios.length },
+        { Indicador: 'Licencias activas', Valor: licencias.filter((l: any) => l.estado === 'Activa').length },
+        { Indicador: 'Asientos de licencia libres', Valor: licencias.reduce((t: number, l: any) => t + (l.asientos_libres || 0), 0) },
+        { Indicador: 'Anotaciones en bitacora', Valor: observaciones.length },
+        { Indicador: 'Generado el', Valor: new Date().toLocaleString('es-PE') },
+      ]);
+
+      // 2. Activos, con todo lo que se conoce de cada uno
+      agregar('Activos', activos.map((a: any) => ({
+        'ID': a.id,
+        'Categoria': a.categoria,
+        'Marca': a.marca,
+        'Modelo': a.modelo,
+        'Numero de Serie': a.serial_id,
+        'Codigo CAF': a.caf || '',
+        'Linea Telefonica': a.linea_telefonica || '',
+        'Especificaciones': a.especificaciones || '',
+        'Condicion Fisica': a.nombre_estado || '',
+        'Estado Operativo': a.estado_actual || '',
+        'Regimen': a.tipo_propiedad || 'Compra',
+        'Fin de Alquiler': dia(a.fecha_fin_alquiler),
+        'Custodio': a.nombre_completo || 'Almacen Central TI',
+        'DNI Custodio': a.dni || '',
+        'Area': a.nombre_area || '',
+        'Cargo': a.nombre_cargo || '',
+        'Fecha de Registro': dia(a.fecha_registro),
+      })));
+
+      const porActivo = new Map(activos.map((a: any) => [Number(a.id), a]));
+
+      // 3. Cadena de custodia completa
+      agregar('Historial de Custodia', asignaciones.map((c: any) => {
+        const eq: any = porActivo.get(Number(c.activo_id));
+        return {
+          'Activo ID': c.activo_id,
+          'Equipo': eq ? `${eq.categoria} ${eq.marca} ${eq.modelo}` : '',
+          'Numero de Serie': eq?.serial_id || '',
+          'Codigo CAF': eq?.caf || '',
+          'Responsable': c.usuarios?.nombre_completo || '',
+          'DNI': c.usuarios?.dni || '',
+          'Estado': c.estado_asignacion,
+          'Devolucion': dia(c.fecha_devolucion),
+          'Origen': c.text_asignacion || '',
+        };
+      }));
+
+      // 4. Prestamos
+      agregar('Prestamos', prestamos.map((p: any) => {
+        const eq: any = porActivo.get(Number(p.activo_id));
+        const pendiente = String(p.estado_prestamo || '').trim() === 'Pendiente';
+        const vencido = pendiente && p.fecha_devolucion_estimada && new Date(p.fecha_devolucion_estimada) < new Date();
+        return {
+          'Responsable': p.nombre_prestatario || '',
+          'Contacto': p.celular_contacto || '',
+          'Equipo': eq ? `${eq.categoria} ${eq.marca} ${eq.modelo}` : (p.nombre_activo || ''),
+          'Numero de Serie': eq?.serial_id || '',
+          'Estado': p.estado_prestamo,
+          'Situacion': vencido ? 'VENCIDO' : pendiente ? 'Pendiente' : 'Cerrado',
+          'Devolucion Estimada': dia(p.fecha_devolucion_estimada),
+          'Devolucion Real': dia(p.fecha_devolucion_real),
+          'Observaciones': p.observaciones || '',
+        };
+      }));
+
+      // 5. Licencias y sus ocupantes
+      agregar('Licencias', licencias.map((l: any) => ({
+        'Servicio': l.nombre_servicio,
+        'Proveedor': l.proveedor || '',
+        'Plan': l.plan || '',
+        'Tipo': l.tipo,
+        'Asientos': l.cantidad_asientos,
+        'Ocupados': l.asientos_usados,
+        'Libres': l.asientos_libres,
+        'Costo': l.costo ?? '',
+        'Moneda': l.moneda || '',
+        'Ciclo': l.ciclo_facturacion || '',
+        'Renovacion': dia(l.fecha_renovacion),
+        'Dias para Renovar': l.dias_para_renovar ?? '',
+        'Renovacion Automatica': l.renovacion_automatica ? 'Si' : 'No',
+        'Estado': l.estado,
+        'Notas': l.notas || '',
+      })));
+
+      agregar('Asientos de Licencia', licAsignaciones.map((a: any) => ({
+        'Servicio': a.licencias?.nombre_servicio || '',
+        'Colaborador': a.usuarios?.nombre_completo || '',
+        'DNI': a.usuarios?.dni || '',
+        'Cuenta de Activacion': a.cuenta_activacion || '',
+        'Estado': a.estado_asignacion,
+        'Asignado el': dia(a.fecha_asignacion),
+        'Liberado el': dia(a.fecha_baja),
+      })));
+
+      // 6. Personal
+      agregar('Colaboradores', usuarios.map((u: any) => ({
+        'Nombre': u.nombre_completo,
+        'DNI': u.dni || '',
+        'Area': u.areas?.nombre_area || u.nombre_area || '',
+        'Cargo': u.cargos?.nombre_cargo || '',
+        'Estado': u.estado || '',
+        'Equipos en Custodia': activos.filter((a: any) => Number(a.asignado_usuario_id) === Number(u.id)).length,
+        'Licencias Activas': licAsignaciones.filter((a: any) => Number(a.usuario_id) === Number(u.id) && a.estado_asignacion === 'Activo').length,
+      })));
+
+      // 7. Bitacora tecnica
+      agregar('Bitacora', observaciones.map((o: any) => {
+        const eq: any = porActivo.get(Number(o.activo_id));
+        return {
+          'Activo ID': o.activo_id,
+          'Equipo': eq ? `${eq.categoria} ${eq.marca} ${eq.modelo}` : '',
+          'Numero de Serie': eq?.serial_id || '',
+          'Tipo': o.tipo_observacion || '',
+          'Comentario': o.comentario || '',
+          'Fecha': dia(o.fecha_registro),
+        };
+      }));
+
+      XLSX.writeFile(wb, `Reporte_General_Extenso_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err: any) {
+      alert(`Error al generar el reporte: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const manejarSort = (criterio: CriterioSort) => {
@@ -340,9 +522,14 @@ const cargarDatosAuditoria = async () => {
   };
 
   const activosFiltrados = useMemo(() => {
+    const coincideTexto = crearFiltro<any>(filtroTexto, [
+      'serial_id', 'caf', 'nombre_completo', 'dni', 'marca', 'modelo',
+      'nombre_estado', 'tipo_propiedad', 'nombre_cargo', 'especificaciones', 'linea_telefonica',
+      'categoria', 'nombre_area'
+    ]);
+
     return activos.filter(a => {
-      const term = filtroTexto.toLowerCase().trim();
-      const cumpleTexto = !term || String(a.serial_id || '').toLowerCase().includes(term) || String(a.caf || '').toLowerCase().includes(term) || String(a.nombre_completo || '').toLowerCase().includes(term) || String(a.dni || '').toLowerCase().includes(term) || String(a.marca || '').toLowerCase().includes(term) || String(a.modelo || '').toLowerCase().includes(term) || String(a.nombre_estado || '').toLowerCase().includes(term) || String(a.tipo_propiedad || '').toLowerCase().includes(term) || String(a.nombre_cargo || '').toLowerCase().includes(term);
+      const cumpleTexto = coincideTexto(a);
       const cumpleArea = filtroArea === 'Todos' || String(a.nombre_area) === filtroArea;
       const cumpleCargo = filtroCargo === 'Todos' || String(a.nombre_cargo) === filtroCargo;
       const cumpleCategoria = filtroCategoria === 'Todos' || String(a.categoria) === filtroCategoria;
@@ -509,12 +696,18 @@ const cargarDatosAuditoria = async () => {
             </select>
           </div>
           <div className="flex flex-col space-y-1 justify-end">
-            <button type="button" onClick={ejecutarExportacionExcel} className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-lg shadow-md uppercase transition-all flex items-center justify-center gap-1.5 active:scale-95">📥 Generar Informe (.xlsx)</button>
+            <div className="space-y-1.5">
+              <button type="button" onClick={ejecutarExportacionExcel} className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-lg shadow-md uppercase transition-all flex items-center justify-center gap-1.5 active:scale-95">📥 Reporte de Oficina (.xlsx)</button>
+              <p className="text-[10px] text-slate-400 font-medium leading-tight text-center">Respeta los filtros de esta pantalla.</p>
+
+              <button type="button" onClick={exportarReporteGeneralExtenso} style={{ backgroundColor: 'var(--color-upeu)' }} className="w-full py-2 mt-2 text-white font-black text-xs rounded-lg shadow-md uppercase transition-all flex items-center justify-center gap-1.5 active:scale-95 hover:brightness-110">📚 Reporte General Extenso</button>
+              <p className="text-[10px] text-slate-400 font-medium leading-tight text-center">Todo el sistema, sin filtros: activos, custodia, prestamos, licencias, personal y bitacora.</p>
+            </div>
           </div>
         </div>
 
         <div className="flex-1 flex flex-col min-h-0 bg-white rounded-xl border overflow-hidden">
-          <TablaControl tituloSeccion="Bitácora y Malla de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} columnas={columnasConfig} />
+          <TablaControl tituloSeccion="Bitácora y Malla de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} columnas={columnasConfig} idDestacado={idDestacado} />
         </div>
       </div>
 
@@ -550,7 +743,7 @@ const cargarDatosAuditoria = async () => {
               type="button" 
               onClick={procesarInformeConIA} 
               disabled={analizandoIA}
-              style={{ backgroundColor: 'rgb(1, 71, 118)' }}
+              style={{ backgroundColor: 'var(--color-upeu)' }}
               className="w-full py-3 text-white uppercase font-black rounded-xl shadow-md transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {analizandoIA ? '🤖 Analizando Historial Completo...' : '✨ Generar Redacción Profesional Completa'}

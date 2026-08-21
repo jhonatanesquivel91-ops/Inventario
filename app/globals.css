@@ -1,26 +1,208 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ---------------------------------------------------------------------------
+   Identidad visual UPeU.
+   El azul institucional estaba escrito a mano como rgb(1, 71, 118) en 23
+   lugares distintos. Aquí queda definido una sola vez y se usa con las
+   utilidades `bg-upeu`, `text-upeu`, `border-upeu`, etc.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-upeu: #014776;
+  --color-upeu-claro: #0a5f96;
+  --color-upeu-oscuro: #013456;
+
+  /* El azul cuando se usa como color de texto sobre una superficie.
+     Se separa de --color-upeu porque en tema oscuro debe aclararse:
+     el azul institucional sobre una tarjeta oscura resulta ilegible. */
+  --color-upeu-texto: #014776;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/* La app es una herramienta de escritorio y móvil con tema claro fijo: no se
+   define un esquema oscuro para que los colores no cambien según el sistema. */
+html {
+  color-scheme: light;
+  /* Evita que iOS agrande los textos al girar el teléfono. */
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-slate-50);
+  color: var(--color-slate-800);
+}
+
+/* En móvil, los campos con menos de 16px provocan que Safari haga zoom
+   automático al enfocarlos y descuadre la pantalla. */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+/* Deja de animar para quienes lo pidan a nivel de sistema. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   TEMA OSCURO
+
+   Cada override apunta a una CLASE concreta, nunca a una variable de color de
+   Tailwind. El motivo: una misma variable alimenta al texto y al fondo
+   (`--color-red-600` sirve a `text-red-600` y a `bg-red-600`), y en tema
+   oscuro cada rol necesita ir en direcciones opuestas: el texto rojo debe
+   aclararse para leerse, mientras que el botón rojo debe seguir siendo rojo
+   intenso para que el texto blanco encima contraste.
+
+   Redefinir la variable arregla uno y rompe el otro. Por eso todo lo de abajo
+   se declara por clase.
+--------------------------------------------------------------------------- */
+@custom-variant dark (&:where(.dark, .dark *));
+
+.dark {
+  color-scheme: dark;
+
+  /* El azul institucional no cambia: la cabecera y el menú llevan texto
+     blanco encima y contrastan mejor sobre el tono original. */
+  --color-upeu: #014776;
+  /* El azul como TEXTO sí se aclara, o desaparece sobre las tarjetas. */
+  --color-upeu-texto: #7cc5f2;
+}
+
+/* --- Superficies ---------------------------------------------------------- */
+.dark body { background-color: #0f172a; }
+.dark .bg-white { background-color: #1e293b; }
+.dark .bg-slate-50 { background-color: #0f172a; }
+.dark .bg-slate-100 { background-color: #1e293b; }
+.dark .bg-slate-200 { background-color: #334155; }
+.dark .bg-slate-400 { background-color: #64748b; }
+/* bg-slate-900 se deja intacto: son los avisos flotantes, ya oscuros y con
+   texto blanco encima. Aclararlos los volvería ilegibles. */
+
+/* --- Texto ---------------------------------------------------------------- */
+.dark .text-slate-900 { color: #f8fafc; }
+.dark .text-slate-800 { color: #f1f5f9; }
+.dark .text-slate-700 { color: #e2e8f0; }
+.dark .text-slate-600 { color: #cbd5e1; }
+.dark .text-slate-500 { color: #a8b6c8; }
+.dark .text-slate-400 { color: #94a3b8; }
+
+/* --- Bordes --------------------------------------------------------------- */
+.dark .border-slate-100 { border-color: #293548; }
+.dark .border-slate-200 { border-color: #334155; }
+.dark .border-slate-300 { border-color: #475569; }
+.dark .border { border-color: #334155; }
+.dark .divide-slate-100 > * + * { border-color: #293548; }
+
+/* --- Fondos tenues de aviso ----------------------------------------------- */
+.dark .bg-red-50 { background-color: #3f1d21; }
+.dark .bg-rose-50 { background-color: #3f1d28; }
+.dark .bg-amber-50 { background-color: #3d2f13; }
+.dark .bg-emerald-50 { background-color: #10312a; }
+.dark .bg-blue-50 { background-color: #14283f; }
+.dark .bg-blue-100 { background-color: #1e3a5f; }
+
+.dark .border-red-100 { border-color: #5b2a2f; }
+.dark .border-red-200 { border-color: #6b3238; }
+.dark .border-rose-100 { border-color: #5b2a38; }
+.dark .border-amber-100 { border-color: #55421b; }
+.dark .border-amber-200 { border-color: #6b5322; }
+.dark .border-emerald-100 { border-color: #17453b; }
+.dark .border-emerald-200 { border-color: #1d5a4b; }
+
+/* --- Texto de aviso: se aclara sobre los fondos de arriba ------------------ */
+.dark .text-red-600 { color: #f87171; }
+.dark .text-red-700 { color: #fca5a5; }
+.dark .text-red-800 { color: #fecaca; }
+.dark .text-rose-600 { color: #fb7185; }
+.dark .text-rose-700 { color: #fda4af; }
+.dark .text-rose-800 { color: #fecdd3; }
+.dark .text-amber-600 { color: #fbbf24; }
+.dark .text-amber-700 { color: #fcd34d; }
+.dark .text-amber-800 { color: #fde68a; }
+.dark .text-emerald-600 { color: #34d399; }
+.dark .text-emerald-700 { color: #6ee7b7; }
+.dark .text-emerald-800 { color: #a7f3d0; }
+.dark .text-blue-600 { color: #60a5fa; }
+.dark .text-blue-700 { color: #93c5fd; }
+.dark .text-blue-800 { color: #bfdbfe; }
+/* text-blue-50 / -100 / -200 NO se tocan: son el texto claro que va sobre la
+   cabecera y el menú azules, y ahí deben seguir siendo claros. */
+
+/* --- Controles ------------------------------------------------------------ */
+.dark input,
+.dark select,
+.dark textarea {
+  background-color: #0f172a;
+  border-color: #334155;
+  color: #f1f5f9;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b; }
+
+.dark option { background-color: #1e293b; color: #f1f5f9; }
+
+.dark .shadow-sm,
+.dark .shadow-xs { box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }
+
+/* ---------------------------------------------------------------------------
+   Fila señalada por una notificación.
+
+   Se usa ámbar y no el azul institucional a propósito: el azul es el color de
+   la interfaz y se confundiría con ella. El ámbar significa "esto es lo que
+   acabas de pulsar" y no colisiona con el rojo de las incidencias críticas.
+
+   Late tres veces para atrapar la mirada y luego se queda en un tono estable,
+   de modo que la fila siga siendo identificable un minuto después.
+--------------------------------------------------------------------------- */
+:root {
+  --destacado: #b45309;
+  --destacado-tinte: rgb(245 158 11 / 0.42);
+  --destacado-tinte-fuerte: rgb(245 158 11 / 0.72);
+  --destacado-reposo: rgb(245 158 11 / 0.34);
+  --destacado-texto: #1c2532;
+}
+
+.dark {
+  --destacado: #fbbf24;
+  --destacado-tinte: rgb(251 191 36 / 0.26);
+  --destacado-tinte-fuerte: rgb(251 191 36 / 0.44);
+  --destacado-reposo: rgb(251 191 36 / 0.22);
+  --destacado-texto: #f8fafc;
+}
+
+.fila-destacada {
+  background-color: var(--destacado-reposo);
+  box-shadow:
+    inset 5px 0 0 0 var(--destacado),
+    inset 0 0 0 2px var(--destacado);
+  animation: latido-fila 2.4s ease-out 3;
+}
+
+/* Las celdas son transparentes para que se vea el fondo de la fila. */
+.fila-destacada td { background-color: transparent; }
+
+/* Solo la celda fija el color base; lo heredan los hijos que no traen el suyo.
+   Así las pastillas de estado conservan su texto blanco sobre su color. */
+.fila-destacada td { color: var(--destacado-texto); }
+
+@keyframes latido-fila {
+  0%   { background-color: var(--destacado-tinte-fuerte); }
+  45%  { background-color: var(--destacado-tinte); }
+  100% { background-color: var(--destacado-reposo); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fila-destacada { animation: none; }
 }

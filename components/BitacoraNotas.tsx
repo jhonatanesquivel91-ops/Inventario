@@ -51,7 +51,7 @@ export function BitacoraNotas({
         </div>
         <div className="flex gap-2">
           <input type="text" value={nuevoComentario} onChange={(e) => setNuevoComentario(e.target.value)} placeholder="Ej: Equipo enviado a mantenimiento por conector..." className="flex-1 p-2 border border-slate-200 rounded-lg text-xs bg-white text-slate-800 outline-none font-bold placeholder-slate-300" required />
-          <button type="submit" disabled={enviandoComentario} style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="px-4 py-2 text-white font-black rounded-lg uppercase tracking-wider text-[10px] disabled:opacity-50 shadow-sm transition-all active:scale-95">
+          <button type="submit" disabled={enviandoComentario} style={{ backgroundColor: 'var(--color-upeu)' }} className="px-4 py-2 text-white font-black rounded-lg uppercase tracking-wider text-[10px] disabled:opacity-50 shadow-sm transition-all active:scale-95">
             {enviandoComentario ? '...' : 'Añadir'}
           </button>
         </div>

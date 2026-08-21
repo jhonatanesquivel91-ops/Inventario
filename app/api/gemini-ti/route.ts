@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { createClient } from '@supabase/supabase-js';
+import { crearClienteServidor, obtenerUsuario } from '@/lib/supabase-server';
 
 const aiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
-
 export async function POST(request: Request) {
   try {
+    // Esta ruta puede modificar activos, así que exige sesión antes de nada.
+    const usuario = await obtenerUsuario();
+    if (!usuario) {
+      return NextResponse.json({ texto: "Sesión expirada. Vuelve a iniciar sesión." }, { status: 401 });
+    }
+
+    // Cliente con la sesión del usuario: las consultas pasan por RLS.
+    const supabase = await crearClienteServidor();
+
     if (!aiKey) return NextResponse.json({ texto: "❌ Configura tu API Key." }, { status: 500 });
 
     const { messages } = await request.json();

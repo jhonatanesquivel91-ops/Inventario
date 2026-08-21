@@ -13,7 +13,7 @@ export function HeaderVista({ titulo, subtitulo, badgeStatus, children }: Header
       <div className="space-y-0.5">
         <div className="flex items-center gap-2">
           {badgeStatus && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>}
-          <h1 className="text-lg font-black tracking-tight" style={{ color: 'rgb(1, 71, 118)' }}>{titulo}</h1>
+          <h1 className="text-lg font-black tracking-tight" style={{ color: 'var(--color-upeu-texto)' }}>{titulo}</h1>
         </div>
         <p className="text-slate-500 text-[11px] font-medium tracking-wide">{subtitulo}</p>
       </div>

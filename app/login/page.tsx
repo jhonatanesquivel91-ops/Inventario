@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -15,27 +16,27 @@ export default function LoginPage() {
     setLoading(true);
     setErrorMsg('');
 
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
+    // Autenticación real contra Supabase Auth. La sesión queda en una cookie
+    // firmada y es la que habilita las políticas RLS de la base de datos.
+    // Se normaliza el correo: un espacio al pegar o una mayúscula accidental
+    // bastan para que Supabase rechace las credenciales.
+    const { error } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    });
 
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        // Al ser correcto, redirige de inmediato al inventario
-        router.push('/activos');
-        router.refresh(); // Refresca el estado global de las rutas
-      } else {
-        setErrorMsg(`❌ ${data.message || 'Credenciales incorrectas.'}`);
-      }
-    } catch (err) {
-      setErrorMsg('❌ Ocurrió un error al conectar con el servicio de autenticación.');
-    } finally {
+    if (error) {
+      setErrorMsg(
+        error.message === 'Invalid login credentials'
+          ? 'Credenciales incorrectas.'
+          : 'No se pudo conectar con el servicio de autenticación.'
+      );
       setLoading(false);
+      return;
     }
+
+    router.push('/activos');
+    router.refresh();
   };
 
   return (
@@ -43,7 +44,7 @@ export default function LoginPage() {
       <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden">
         
         {/* Encabezado Principal */}
-        <div className="p-8 text-white text-center flex flex-col items-center gap-3" style={{ backgroundColor: 'rgb(1, 71, 118)' }}>
+        <div className="p-8 text-white text-center flex flex-col items-center gap-3" style={{ backgroundColor: 'var(--color-upeu)' }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-upeu.png" alt="Logo UPeU" className="h-16 w-auto object-contain" />
           <div>
@@ -87,7 +88,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={loading}
-            style={{ backgroundColor: 'rgb(1, 71, 118)' }}
+            style={{ backgroundColor: 'var(--color-upeu)' }}
             className="w-full mt-2 py-3 text-white text-xs font-bold rounded-xl shadow transition-all hover:brightness-110 disabled:opacity-50"
           >
             {loading ? 'Validando Administrador...' : 'Ingresar al Sistema'}

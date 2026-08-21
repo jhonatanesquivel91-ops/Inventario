@@ -260,7 +260,7 @@ export default function TransferenciasEspejo() {
               </TablaControl>
             </div>
             {marcadosA.length > 0 && usuarioB && (
-              <button type="button" onClick={() => ejecutarTraspaso(marcadosA, true)} disabled={guardando} className="w-full py-2.5 mt-2 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs uppercase rounded-xl tracking-wider shadow transition-all active:scale-95" style={{ backgroundColor: 'rgb(1, 71, 118)' }}>
+              <button type="button" onClick={() => ejecutarTraspaso(marcadosA, true)} disabled={guardando} className="w-full py-2.5 mt-2 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs uppercase rounded-xl tracking-wider shadow transition-all active:scale-95" style={{ backgroundColor: 'var(--color-upeu)' }}>
                 Transferir bloque marcado hacia Lado B ➔ ({marcadosA.length})
               </button>
             )}
@@ -334,7 +334,7 @@ export default function TransferenciasEspejo() {
               </TablaControl>
             </div>
             {marcadosB.length > 0 && usuarioA && (
-              <button type="button" onClick={() => ejecutarTraspaso(marcadosB, false)} disabled={guardando} className="w-full py-2.5 mt-2 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs uppercase rounded-xl tracking-wider shadow transition-all active:scale-95" style={{ backgroundColor: 'rgb(1, 71, 118)' }}>
+              <button type="button" onClick={() => ejecutarTraspaso(marcadosB, false)} disabled={guardando} className="w-full py-2.5 mt-2 bg-blue-800 hover:bg-blue-900 text-white font-bold text-xs uppercase rounded-xl tracking-wider shadow transition-all active:scale-95" style={{ backgroundColor: 'var(--color-upeu)' }}>
                 ◀ Transferir bloque marcado hacia Lado A ({marcadosB.length})
               </button>
             )}
