@@ -37,7 +37,7 @@ export const TablaActivos: React.FC<TablaActivosProps> = ({
   return (
     <div className="w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
       <table className="w-full border-collapse text-left text-sm text-slate-600">
-        <thead style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="text-xs uppercase text-white font-semibold">
+        <thead style={{ backgroundColor: 'var(--color-upeu)' }} className="text-xs uppercase text-white font-semibold">
           <tr>
             <th className="px-6 py-4 border-b border-slate-200 w-12 text-center">
               <input 

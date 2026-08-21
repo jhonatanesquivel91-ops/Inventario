@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
+import { crearFiltro } from '@/lib/busqueda';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
 import { BuscadorControl } from '@/components/BuscadorControl';
@@ -75,14 +76,9 @@ export default function GestionPersonalPage() {
   const datasetFiltrado = React.useMemo(() => {
     const termino = busqueda.toLowerCase().trim();
     if (subTab === 'colaboradores') {
-      return usuarios.filter(u =>
-        !termino ||
-        String(u.nombre_completo || '').toLowerCase().includes(termino) ||
-        String(u.dni || '').toLowerCase().includes(termino) ||
-        String(u.estado || '').toLowerCase().includes(termino) ||
-        String(u.areas?.nombre_area || '').toLowerCase().includes(termino) ||
-        String(u.cargos?.nombre_cargo || '').toLowerCase().includes(termino)
-      );
+      return usuarios.filter(crearFiltro<any>(busqueda, [
+        'nombre_completo', 'dni', 'estado', 'areas.nombre_area', 'cargos.nombre_cargo'
+      ]));
     }
     if (subTab === 'areas') {
       return areas.filter(a => !termino || String(a.nombre_area || '').toLowerCase().includes(termino));
@@ -275,9 +271,9 @@ export default function GestionPersonalPage() {
         badgeStatus="online"
       >
         <div className="flex bg-slate-100 p-1 rounded-xl border text-[11px] font-black gap-1">
-          <button onClick={() => setSubTab('colaboradores')} className={`px-3 py-1.5 rounded-lg transition-all ${subTab === 'colaboradores' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`} style={subTab === 'colaboradores' ? { color: 'rgb(1, 71, 118)' } : {}}>Colaboradores</button>
-          <button onClick={() => setSubTab('areas')} className={`px-3 py-1.5 rounded-lg transition-all ${subTab === 'areas' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`} style={subTab === 'areas' ? { color: 'rgb(1, 71, 118)' } : {}}>Áreas</button>
-          <button onClick={() => setSubTab('cargos')} className={`px-3 py-1.5 rounded-lg transition-all ${subTab === 'cargos' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`} style={subTab === 'cargos' ? { color: 'rgb(1, 71, 118)' } : {}}>Cargos</button>
+          <button onClick={() => setSubTab('colaboradores')} className={`px-3 py-1.5 rounded-lg transition-all ${subTab === 'colaboradores' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`} style={subTab === 'colaboradores' ? { color: 'var(--color-upeu-texto)' } : {}}>Colaboradores</button>
+          <button onClick={() => setSubTab('areas')} className={`px-3 py-1.5 rounded-lg transition-all ${subTab === 'areas' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`} style={subTab === 'areas' ? { color: 'var(--color-upeu-texto)' } : {}}>Áreas</button>
+          <button onClick={() => setSubTab('cargos')} className={`px-3 py-1.5 rounded-lg transition-all ${subTab === 'cargos' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`} style={subTab === 'cargos' ? { color: 'var(--color-upeu-texto)' } : {}}>Cargos</button>
         </div>
       </HeaderVista>
 

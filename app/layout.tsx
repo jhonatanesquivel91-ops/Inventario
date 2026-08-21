@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { BotonTema } from '@/components/BotonTema';
+import { anunciarDestacado } from '@/lib/useDestacar';
 import '@/app/globals.css';
 
 export default function RootLayout({
@@ -16,6 +18,9 @@ export default function RootLayout({
 
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
+  // En móvil el menú lateral se oculta y se despliega como panel deslizante.
+  const [menuAbierto, setMenuAbierto] = useState(false);
+
   // 🔔 Estados para Alertas en la Campana
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [notificaciones, setNotificaciones] = useState<any[]>([]);
@@ -23,27 +28,35 @@ export default function RootLayout({
 
   const isLoginPage = currentPath === '/login';
 
+  // Ordenado por frecuencia de uso real: lo que se toca a diario va primero.
   const menuItems = [
-    { 
-      category: 'INVENTARIO', 
+    {
+      category: 'OPERACIÓN DIARIA',
       items: [
-        { name: '📦 Stock de Activos', path: '/activos' },
+        { name: '📥 Asignación y Custodia', path: '/asignaciones/alta' },
+        { name: '📋 Préstamos de Equipos', path: '/prestamos' },
+        { name: '🔄 Traspasos entre Áreas', path: '/asignaciones/traspaso' },
       ]
     },
-    { 
-      category: 'OPERACIONES CUSTODIA', 
+    {
+      category: 'INVENTARIO',
       items: [
-        { name: '📥 Asignación Express', path: '/asignaciones/alta' },
-        { name: '🔄 Transferencias Espejo', path: '/asignaciones/traspaso' },
-        { name: '📋 Préstamos Equipos', path: '/prestamos' },
+        { name: '📦 Activos', path: '/activos' },
+        { name: '🔑 Licencias', path: '/licencias' },
+        { name: '👥 Colaboradores', path: '/personal' },
       ]
     },
-    { 
-      category: 'CONTROL', 
+    {
+      category: 'SEGUIMIENTO',
       items: [
-        { name: '👥 Gestión de Personal', path: '/personal' },
-        { name: '📊 Reportes de Oficina', path: '/reportes' },
-        { name: '⚙️ Configuración Sistema', path: '/configuracion' },
+        { name: '🔔 Alertas Técnicas', path: '/alertas' },
+        { name: '📊 Reportes', path: '/reportes' },
+      ]
+    },
+    {
+      category: 'SISTEMA',
+      items: [
+        { name: '⚙️ Configuración', path: '/configuracion' },
       ]
     }
   ];
@@ -55,9 +68,38 @@ export default function RootLayout({
       ahora.setHours(0, 0, 0, 0);
 
       // 1. 🛡️ CONSULTA CORREGIDA: Quitamos "marca" y "modelo" que hacían romper la base de datos
-      const [resPrestamos, resActivos] = await Promise.all([
-        supabase.from('prestamos').select('*'),
-        supabase.from('activos').select('id, caf, tipo_propiedad, fecha_fin_alquiler, serial_id')
+      // Solo se traen las filas que pueden generar una alerta, y solo sus
+      // columnas. Antes se descargaba el inventario entero cada 30 segundos
+      // en todas las pantallas: crecía con el catálogo y consumía cuota de
+      // forma continua sin aportar nada.
+      const hoyISO = new Date().toISOString().slice(0, 10);
+
+      const limiteAlquiler = new Date();
+      limiteAlquiler.setDate(limiteAlquiler.getDate() + 10);
+      const limiteAlquilerISO = limiteAlquiler.toISOString().slice(0, 10);
+
+      const [resPrestamos, resActivos, resLicencias] = await Promise.all([
+        // El estado NO se filtra en el servidor: el código original hacía
+        // `.trim()` sobre `estado_prestamo`, señal de que hay valores con
+        // espacios que una comparación exacta descartaría en silencio. Se
+        // filtra por fecha, que sí es fiable, y el estado se evalúa abajo.
+        supabase
+          .from('prestamos')
+          .select('id, activo_id, nombre_activo, nombre_prestatario, estado_prestamo, fecha_devolucion_estimada, alerta_activa')
+          .not('fecha_devolucion_estimada', 'is', null)
+          .lte('fecha_devolucion_estimada', hoyISO),
+        supabase
+          .from('activos')
+          .select('id, caf, tipo_propiedad, fecha_fin_alquiler, serial_id')
+          .eq('tipo_propiedad', 'Alquiler')
+          .not('fecha_fin_alquiler', 'is', null)
+          .lte('fecha_fin_alquiler', limiteAlquilerISO),
+        // La tabla puede no existir todavía si no se corrió la migración: se
+        // ignora el error para no romper el resto de las alertas.
+        supabase
+          .from('vista_licencias_completa')
+          .select('id, nombre_servicio, proveedor, fecha_renovacion, dias_para_renovar, renovacion_automatica, costo, moneda')
+          .eq('estado', 'Activa')
       ]);
 
       if (resPrestamos.error) console.error("⚠️ Error en préstamos:", resPrestamos.error.message);
@@ -65,6 +107,25 @@ export default function RootLayout({
 
       const prestamos = resPrestamos.data || [];
       const activos = resActivos.data || [];
+      const licencias = resLicencias.data || [];
+
+      // `activos` ahora solo trae alquileres, así que el CAF de los equipos
+      // prestados se pide aparte, y únicamente para los que tienen alerta.
+      const idsPrestados = [...new Set(
+        prestamos.map(p => p.activo_id).filter(Boolean).map(Number)
+      )];
+
+      const cafPorActivo = new Map<number, string>();
+      if (idsPrestados.length > 0) {
+        const { data: activosPrestados } = await supabase
+          .from('activos')
+          .select('id, caf')
+          .in('id', idsPrestados);
+
+        (activosPrestados || []).forEach(a => {
+          if (a.caf) cafPorActivo.set(Number(a.id), a.caf);
+        });
+      }
 
       // ==========================================
       // LÓGICA A: PROCESAR PRÉSTAMOS VENCIDOS
@@ -82,14 +143,14 @@ export default function RootLayout({
               day: '2-digit', month: '2-digit', year: 'numeric'
             });
 
-            const activoVinculado = activos.find(a => Number(a.id) === Number(p.activo_id));
-            const identificadorCaf = activoVinculado?.caf ? `[CAF: ${activoVinculado.caf}] ` : '';
+            const cafDelActivo = cafPorActivo.get(Number(p.activo_id));
+            const identificadorCaf = cafDelActivo ? `[CAF: ${cafDelActivo}] ` : '';
             const textoActivoFinal = `${identificadorCaf}${p.nombre_activo || 'Hardware de Retén'}`;
 
             listaAlertas.push({
               id: `prestamo-${p.id}`,
               tipo: 'vencido',
-              ruta: '/prestamos',
+              ruta: `/prestamos?destacar=${p.id}`,
               icono: '⏳',
               titulo: '⏰ Devolución Vencida',
               detalle: `Responsable: ${p.nombre_prestatario || 'No asignado'}`,
@@ -128,7 +189,7 @@ export default function RootLayout({
             listaAlertas.push({
               id: `alquiler-vencido-${a.id}`,
               tipo: 'alquiler_vencido',
-              ruta: '/reportes',
+              ruta: `/reportes?destacar=${a.id}`,
               icono: '🚨',
               titulo: '❌ Contrato Renting Vencido',
               detalle: `El contrato de arrendamiento caducó hace ${Math.abs(diasRestantes)} días.`,
@@ -142,7 +203,7 @@ export default function RootLayout({
             listaAlertas.push({
               id: `alquiler-alerta-${a.id}`,
               tipo: 'alquiler_alerta',
-              ruta: '/reportes',
+              ruta: `/reportes?destacar=${a.id}`,
               icono: '📦',
               titulo: '⚠️ Alquiler por Vencer',
               detalle: `Contrato próximo a expirar en ${diasRestantes} días.`,
@@ -154,6 +215,38 @@ export default function RootLayout({
         }
       });
 
+      // ==========================================
+      // LÓGICA C: RENOVACIONES DE LICENCIAS DE SOFTWARE
+      // ==========================================
+      licencias.forEach(l => {
+        const dias = l.dias_para_renovar;
+        if (dias === null || dias === undefined) return;
+        if (dias > 30) return;
+
+        const fechaFormateada = new Date(`${l.fecha_renovacion}T00:00:00`).toLocaleDateString('es-PE', {
+          day: '2-digit', month: '2-digit', year: 'numeric'
+        });
+
+        const importe = l.costo ? ` · ${l.moneda === 'PEN' ? 'S/' : '$'}${Number(l.costo).toFixed(2)}` : '';
+        const vencida = dias < 0;
+
+        listaAlertas.push({
+          id: `licencia-${l.id}`,
+          tipo: vencida ? 'licencia_vencida' : 'licencia_alerta',
+          ruta: `/licencias?destacar=${l.id}`,
+          icono: vencida ? '🚨' : '🔑',
+          titulo: vencida ? '❌ Licencia Vencida' : '⚠️ Licencia por Renovar',
+          detalle: l.renovacion_automatica
+            ? `Se renueva sola${importe}. Cancela antes si ya no se usa.`
+            : `Requiere renovación manual${importe}.`,
+          activo: `${l.nombre_servicio}${l.proveedor ? ` (${l.proveedor})` : ''}`,
+          infoFecha: vencida
+            ? `Venció el: ${fechaFormateada}`
+            : `Renueva el: ${fechaFormateada} (${dias} días)`,
+          esCritico: vencida
+        });
+      });
+
       setNotificaciones(listaAlertas);
     } catch (err) {
       console.error("Error al procesar las alertas globales TI:", err);
@@ -162,11 +255,24 @@ export default function RootLayout({
   useEffect(() => {
     if (!isLoginPage) {
       cargarAlertasGlobales();
-      // Refrescar alertas silenciosamente cada 30 segundos
-      const interval = setInterval(cargarAlertasGlobales, 30000);
+      // Cinco minutos: son vencimientos por día, no datos en tiempo real.
+      const interval = setInterval(cargarAlertasGlobales, 5 * 60 * 1000);
       return () => clearInterval(interval);
     }
   }, [isLoginPage]);
+
+  // Al cambiar de sección, cerrar el panel lateral móvil.
+  useEffect(() => {
+    setMenuAbierto(false);
+  }, [currentPath]);
+
+  // Bloquear el scroll del fondo mientras el panel móvil está abierto.
+  useEffect(() => {
+    document.body.style.overflow = menuAbierto ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [menuAbierto]);
 
   // Cerrar menú al hacer clic afuera
   useEffect(() => {
@@ -181,15 +287,21 @@ export default function RootLayout({
 
   const ejecutarCerrarSesion = async () => {
     setShowLogoutModal(false);
-    const res = await fetch('/api/auth/logout', { method: 'POST' });
-    if (res.ok) {
-      router.push('/login');
-      router.refresh();
-    }
+    await supabase.auth.signOut();
+    router.push('/login');
+    router.refresh();
   };
 
   return (
     <html lang="es" suppressHydrationWarning>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem('tema');if(t!=='claro'&&t!=='oscuro'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'oscuro':'claro';}if(t==='oscuro'){document.documentElement.classList.add('dark');}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className="bg-slate-50 text-slate-800 antialiased font-sans" suppressHydrationWarning>
 
         {isLoginPage ? (
@@ -197,32 +309,55 @@ export default function RootLayout({
         ) : (
           <div className="flex h-screen overflow-hidden w-full">
 
-            {/* NAVBAR LATERAL ORIGINAL */}
+            {/* Fondo oscuro: solo en móvil, cierra el menú al tocarlo */}
+            {menuAbierto && (
+              <div
+                onClick={() => setMenuAbierto(false)}
+                className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-30 md:hidden"
+                aria-hidden="true"
+              />
+            )}
+
+            {/* NAVBAR LATERAL: panel deslizante en móvil, columna fija desde md */}
             <aside
-              className="w-64 flex-shrink-0 text-white flex flex-col justify-between shadow-xl z-20"
-              style={{ backgroundColor: 'rgb(1, 71, 118)' }}
+              className={`fixed inset-y-0 left-0 w-72 max-w-[85vw] z-40 flex flex-col justify-between text-white shadow-2xl
+                transition-transform duration-300 ease-out
+                md:static md:w-64 md:max-w-none md:flex-shrink-0 md:shadow-xl md:z-20 md:translate-x-0
+                ${menuAbierto ? 'translate-x-0' : '-translate-x-full'}`}
+              style={{ backgroundColor: 'var(--color-upeu)' }}
             >
               <div>
-                <div className="p-5 border-b border-blue-800 flex flex-col items-center gap-2">
+                <div className="p-5 border-b border-blue-800 flex flex-col items-center gap-2 relative">
+                  <button
+                    type="button"
+                    onClick={() => setMenuAbierto(false)}
+                    className="md:hidden absolute top-3 right-3 w-9 h-9 flex items-center justify-center rounded-lg text-white hover:bg-white/15 active:scale-95 transition-all"
+                    aria-label="Cerrar menú"
+                  >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src="/logo-upeu.png" alt="Logo UPeU" className="h-12 w-auto object-contain" />
                   <div className="text-center">
-                    <p className="text-[9px] text-blue-200 font-bold tracking-tight">Soporte Técnico TI</p>
+                    <p className="text-[10px] text-blue-100 font-bold tracking-tight">Soporte Técnico TI</p>
                   </div>
                 </div>
 
                 <nav className="p-3 space-y-4 overflow-y-auto max-h-[72vh]">
                   {menuItems.map((group, gIdx) => (
                     <div key={gIdx} className="space-y-1">
-                      <span className="text-[9px] font-black text-blue-300 tracking-widest block px-3 mb-1 uppercase">{group.category}</span>
+                      <span className="text-[10px] font-black text-blue-200/90 tracking-widest block px-3 mb-1.5 uppercase">{group.category}</span>
                       {group.items.map((item, idx) => {
                         const isActive = currentPath === item.path;
                         return (
                           <Link
                             key={idx}
                             href={item.path}
-                            className={`flex items-center px-3 py-2 rounded-lg text-[11px] font-bold transition-all duration-150 border-l-2 ${isActive
-                              ? 'bg-blue-900/60 shadow-inner border-white pl-4 text-white font-black'
-                              : 'border-transparent text-blue-100 hover:bg-blue-800/50 hover:pl-4 hover:text-white'
+                            className={`flex items-center px-3 py-2.5 rounded-lg text-[13px] md:text-[12px] font-semibold transition-all duration-150 border-l-2 ${isActive
+                              ? 'bg-white/15 shadow-inner border-white pl-4 text-white font-black'
+                              : 'border-transparent text-white/85 hover:bg-white/10 hover:pl-4 hover:text-white'
                               }`}
                           >
                             {item.name}
@@ -236,7 +371,7 @@ export default function RootLayout({
 
               <div className="p-4 border-t border-blue-800 bg-blue-900/40 flex flex-col gap-1.5">
                 <div className="text-center">
-                  <p className="text-[10px] text-blue-200 font-bold">Jonathan (Admin)</p>
+                  <p className="text-[11px] text-blue-50 font-bold">Jonathan (Admin)</p>
                 </div>
                 <button
                   type="button"
@@ -250,17 +385,39 @@ export default function RootLayout({
 
             {/* CONTENEDOR DERECHO VARIABLE BLANCO */}
             <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50">
-              <header className="h-12 bg-white border-b flex items-center justify-between px-6 shadow-sm z-10">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Módulo Administrativo Autenticado</p>
+              <header
+                className="h-14 flex items-center justify-between px-3 md:px-6 shadow-md z-10 flex-shrink-0 text-white"
+                style={{ backgroundColor: 'var(--color-upeu)' }}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  {/* Abre el menú lateral en móvil */}
+                  <button
+                    type="button"
+                    onClick={() => setMenuAbierto(true)}
+                    className="md:hidden w-10 h-10 flex items-center justify-center rounded-lg text-white hover:bg-white/15 active:scale-95 transition-all flex-shrink-0"
+                    aria-label="Abrir menú"
+                  >
+                    <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M3 6h18M3 12h18M3 18h18" />
+                    </svg>
+                  </button>
+
+                  <span className="md:hidden font-bold text-sm tracking-tight truncate">Inventario TI</span>
+
+                  <span className="hidden md:inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></span>
+                  <p className="hidden md:block text-[11px] text-blue-50/90 font-bold uppercase tracking-wider truncate">
+                    Módulo Administrativo Autenticado
+                  </p>
                 </div>
+
+                <div className="flex items-center gap-1 flex-shrink-0">
+                <BotonTema />
 
                 {/* 🔔 TOPBAR INTERACTIVO CON CAMPANA DINÁMICA */}
                 <div className="relative" ref={notifRef}>
                   <button
                     onClick={() => setShowNotifMenu(!showNotifMenu)}
-                    className="relative p-2 rounded-full hover:bg-slate-100 transition-all text-sm active:scale-90"
+                    className="relative p-2 rounded-full hover:bg-white/15 transition-all text-sm active:scale-90"
                     title="Ver incidencias"
                   >
                     🔔
@@ -273,7 +430,7 @@ export default function RootLayout({
 
                   {/* MENÚ FLOTANTE DE NOTIFICACIONES */}
                   {showNotifMenu && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden max-h-[400px] flex flex-col">
+                    <div className="absolute right-0 mt-2 w-[calc(100vw-1.5rem)] max-w-sm sm:w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden max-h-[70vh] sm:max-h-[400px] flex flex-col">
                       <div className="p-3 bg-slate-50 border-b flex justify-between items-center">
                         <span className="text-[10px] font-black text-slate-700 uppercase tracking-wide">Alertas TI en Tiempo Real</span>
                         <span className="px-1.5 py-0.5 bg-slate-200 text-slate-700 rounded text-[9px] font-black">{notificaciones.length}</span>
@@ -286,6 +443,9 @@ export default function RootLayout({
                               onClick={() => {
                                 router.push(n.ruta);
                                 setShowNotifMenu(false);
+                                // La pantalla destino puede ser la actual: en ese caso
+                                // no se remonta y hay que avisarle explícitamente.
+                                requestAnimationFrame(anunciarDestacado);
                               }}
                               className={`p-3 cursor-pointer transition-all text-[11px] text-left border-b border-slate-100 last:border-0 ${
                                 n.esCritico ? 'hover:bg-red-50/70' : 'hover:bg-amber-50/70'
@@ -315,9 +475,10 @@ export default function RootLayout({
                     </div>
                   )}
                 </div>
+                </div>
               </header>
 
-              <main className="flex-1 overflow-y-auto bg-slate-50 p-4">
+              <main className="flex-1 overflow-y-auto overflow-x-hidden bg-slate-50 p-3 sm:p-4">
                 {children}
               </main>
             </div>

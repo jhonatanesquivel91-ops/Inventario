@@ -23,7 +23,7 @@ export function PanelFormulario({
         <div>
           <span 
             className="text-[11px] font-black tracking-wider uppercase block border-b pb-1.5" 
-            style={{ color: 'rgb(1, 71, 118)' }}
+            style={{ color: 'var(--color-upeu-texto)' }}
           >
             {idEditando ? '✏️ Actualizar Parámetro' : '➕ Registrar Nuevo Elemento'}
           </span>
@@ -51,7 +51,7 @@ export function PanelFormulario({
           <button 
             type="submit" 
             disabled={guardando} 
-            style={{ backgroundColor: 'rgb(1, 71, 118)' }} 
+            style={{ backgroundColor: 'var(--color-upeu)' }} 
             className="flex-2 py-2 text-white font-black rounded-lg text-[11px] uppercase tracking-wider shadow hover:brightness-110 w-full transition-all"
           >
             {guardando ? 'Sincronizando...' : (idEditando ? '💾 Actualizar' : '➕ Guardar Entrada')}

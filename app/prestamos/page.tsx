@@ -2,13 +2,16 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { crearFiltro } from '@/lib/busqueda';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
+import { useDestacar } from '@/lib/useDestacar';
 import { BuscadorControl } from '@/components/BuscadorControl';
 import { PanelFormulario } from '@/components/PanelFormulario';
 import { ModalBase } from '@/components/ModalBase'; // 👈 Tus modals corporativos
 
 export default function ModuloPrestamos() {
+  const idDestacado = useDestacar();
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [prestamos, setPrestamos] = useState<any[]>([]);
@@ -72,15 +75,27 @@ export default function ModuloPrestamos() {
     try {
       const { data } = await supabase
         .from('vista_activos_completa')
-        .select('especificaciones')
+        .select('especificaciones, linea_telefonica')
         .eq('asignado_usuario_id', usr.id) // 🛠️ CORREGIDO: Apunta al campo real de la vista
         .ilike('categoria', '%celular%')
         .limit(1);
 
       if (data && data.length > 0) {
-        // Extraemos el número telefónico de 9 dígitos de las especificaciones
-        const matchNum = String(data[0].especificaciones || '').match(/\d{9,11}/);
-        if (matchNum) setCelular(matchNum[0]);
+        const equipo: any = data[0];
+
+        // Se prefiere la columna dedicada. Si el equipo todavía guarda el
+        // número dentro de las especificaciones (porque no se migró), se
+        // mantiene la extracción original para no perder el autocompletado.
+        const desdeColumna = String(equipo.linea_telefonica || '').replace(/\D/g, '');
+        const desdeSpecs = String(equipo.especificaciones || '').match(/\d{9,11}/);
+
+        if (desdeColumna.length >= 9) {
+          setCelular(desdeColumna.slice(-9));
+        } else if (desdeSpecs) {
+          setCelular(desdeSpecs[0]);
+        } else {
+          setCelular('');
+        }
       } else {
         setCelular('');
       }
@@ -178,7 +193,7 @@ export default function ModuloPrestamos() {
   const datasetFiltrado = useMemo(() => {
     const term = busqueda.toLowerCase().trim();
     if (!term) return prestamos;
-    return prestamos.filter(p => String(p.nombre_prestatario || '').toLowerCase().includes(term) || String(p.nombre_activo || '').toLowerCase().includes(term) || String(p.estado_prestamo || '').toLowerCase().includes(term));
+    return prestamos.filter(crearFiltro<any>(busqueda, ['nombre_prestatario', 'nombre_activo', 'estado_prestamo', 'observaciones', 'fecha_devolucion_estimada']));
   }, [prestamos, busqueda]);
 
   const columnasConfig = useMemo(() => [
@@ -188,7 +203,7 @@ export default function ModuloPrestamos() {
       render: (item: any) => (
         <div>
           <div className="font-bold text-slate-900 text-xs">👤 {item.nombre_prestatario}</div>
-          {item.celular_contacto && <div className="text-[10px] text-slate-400 font-mono mt-0.5">DNI: {item.celular_contacto}</div>}
+          {item.celular_contacto && <div className="text-[10px] text-slate-400 font-mono mt-0.5">📱 {item.celular_contacto}</div>}
         </div>
       )
     },
@@ -196,20 +211,22 @@ export default function ModuloPrestamos() {
       header: "Activo de Retén Asignado",
       field: "nombre_activo",
       render: (item: any) => {
-        // Buscamos el activo para obtener el CAF real de la base de datos
+        // El préstamo guarda `nombre_activo` como texto, copiado al registrarlo.
+        // Si después se edita la marca, el modelo o la serie del equipo, ese
+        // texto queda obsoleto y contradice al inventario. Por eso, cuando el
+        // préstamo apunta a un activo existente se arma el nombre desde la
+        // fuente viva; el texto guardado solo cubre los registros antiguos que
+        // no tienen `activo_id`.
         const activoVinculado = activosSistema.find(a => Number(a.activo_id || a.id) === Number(item.activo_id));
-        const cafDinamico = activoVinculado?.caf;
-        
-        let textoMostrar = item.nombre_activo || '';
 
-        // Si el registro no tiene la palabra "CAF" escrita pero sí tiene un CAF en la BD, lo acomodamos al formato
-        if (cafDinamico && !textoMostrar.includes('CAF:')) {
-          if (textoMostrar.includes('— S/N:')) {
-            textoMostrar = textoMostrar.replace('— S/N:', `— CAF: ${cafDinamico} - S/N:`);
-          } else if (textoMostrar.includes('- S/N:')) {
-            textoMostrar = textoMostrar.replace('- S/N:', `— CAF: ${cafDinamico} - S/N:`);
-          }
-        }
+        const textoMostrar = activoVinculado
+          ? [
+              `[${activoVinculado.categoria || 'Equipo'}]`,
+              [activoVinculado.marca, activoVinculado.modelo].filter(Boolean).join(' '),
+              activoVinculado.caf ? `— CAF: ${activoVinculado.caf}` : '',
+              activoVinculado.serial_id ? `- S/N: ${activoVinculado.serial_id}` : '',
+            ].filter(Boolean).join(' ')
+          : (item.nombre_activo || '—');
 
         return (
           <div className="max-w-xs">
@@ -278,16 +295,16 @@ export default function ModuloPrestamos() {
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-3 min-h-0 overflow-hidden items-stretch">
 
         <div className="lg:col-span-2 flex flex-col min-h-0 bg-white rounded-xl border overflow-hidden">
-          <TablaControl tituloSeccion="Historial de Salidas Retén TI" badgeCount={datasetFiltrado.length} data={datasetFiltrado} loading={loading} columnas={columnasConfig} />
+          <TablaControl tituloSeccion="Historial de Salidas Retén TI" badgeCount={datasetFiltrado.length} data={datasetFiltrado} loading={loading} columnas={columnasConfig} idDestacado={idDestacado} />
         </div>
 
         <PanelFormulario idEditando={null} onCancelar={limpiarCampos} onSubmit={registrarSalidaHardware} guardando={guardando}>
           <div className="relative space-y-1">
             <label className="block font-bold text-slate-500 uppercase text-[10px]">Prestatario *</label>
             <input type="text" value={txtUsuario} onChange={(e) => { setTxtUsuario(e.target.value); if (idUsuario) setIdUsuario(null); }} placeholder="Busca o escribe un colaborador..." className="w-full p-2 border border-slate-200 bg-white rounded-lg outline-none font-bold text-slate-800 text-xs shadow-inner" required />
-            {txtUsuario.trim() && !idUsuario && usuariosSistema.filter(u => u.nombre_completo.toLowerCase().includes(txtUsuario.toLowerCase())).length > 0 && (
+            {txtUsuario.trim() && !idUsuario && usuariosSistema.filter(crearFiltro<any>(txtUsuario, ['nombre_completo', 'dni', 'areas.nombre_area'])).length > 0 && (
               <div className="absolute left-0 right-0 bg-white border rounded-lg max-h-28 overflow-y-auto z-50 mt-1 shadow-xl divide-y">
-                {usuariosSistema.filter(u => u.nombre_completo.toLowerCase().includes(txtUsuario.toLowerCase())).slice(0, 4).map(u => (
+                {usuariosSistema.filter(crearFiltro<any>(txtUsuario, ['nombre_completo', 'dni', 'areas.nombre_area'])).slice(0, 4).map(u => (
                   <div key={u.id} onClick={() => seleccionarUsuarioPredicho(u)} className="p-2 hover:bg-slate-50 cursor-pointer font-bold text-slate-700 text-xs">{u.nombre_completo}</div>
                 ))}
               </div>
@@ -302,9 +319,9 @@ export default function ModuloPrestamos() {
           <div className="relative space-y-1">
             <label className="block font-bold text-slate-500 uppercase text-[10px]">Hardware / Ítem de Almacén *</label>
             <input type="text" value={txtActivo} onChange={(e) => { setTxtActivo(e.target.value); if (idActivo) setIdActivo(null); }} placeholder="Busca por S/N, Marca o Categoría..." className="w-full p-2 border border-slate-200 bg-white rounded-lg outline-none font-bold text-slate-800 text-xs shadow-inner" required />
-            {txtActivo.trim() && !idActivo && activosSistema.filter(a => String(a.serial_id || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.marca || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.categoria || '').toLowerCase().includes(txtActivo.toLowerCase())).length > 0 && (
+            {txtActivo.trim() && !idActivo && activosSistema.filter(crearFiltro<any>(txtActivo, ['serial_id', 'marca', 'modelo', 'categoria', 'caf', 'especificaciones'])).length > 0 && (
               <div className="absolute left-0 right-0 bg-white border rounded-lg max-h-28 overflow-y-auto z-50 mt-1 shadow-xl divide-y text-[11px]">
-                {activosSistema.filter(a => String(a.serial_id || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.marca || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.categoria || '').toLowerCase().includes(txtActivo.toLowerCase()) || String(a.caf || '').toLowerCase().includes(txtActivo.toLowerCase())).slice(0, 4).map(a => (
+                {activosSistema.filter(crearFiltro<any>(txtActivo, ['serial_id', 'marca', 'modelo', 'categoria', 'caf', 'especificaciones'])).slice(0, 4).map(a => (
                   <div
                     key={a.activo_id || a.id}
                     onClick={() => seleccionarActivoPredicho(a)}
@@ -356,7 +373,7 @@ export default function ModuloPrestamos() {
               onClick={procesarAccionSegura}
               disabled={guardando}
               className={`px-3 py-1.5 text-white rounded-lg font-bold shadow-md ${modalSeguridad.tipo === 'eliminar' ? 'bg-red-600' : 'bg-blue-800'}`}
-              style={modalSeguridad.tipo !== 'eliminar' ? { backgroundColor: 'rgb(1, 71, 118)' } : {}}
+              style={modalSeguridad.tipo !== 'eliminar' ? { backgroundColor: 'var(--color-upeu)' } : {}}
             >
               {guardando ? 'Sincronizando...' : 'Confirmar Transacción'}
             </button>

@@ -1,7 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { crearFiltro } from '@/lib/busqueda';
+import { useSoportaLineaTelefonica } from '@/lib/capacidades';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
 import { ModalFormularioActivo } from '@/components/ModalFormularioActivo';
@@ -21,6 +24,8 @@ export default function AsignacionExpress() {
   const [formSerie, setFormSerie] = useState('');
   const [formCaf, setFormCaf] = useState('');
   const [formSpecs, setFormSpecs] = useState('');
+  const [formLinea, setFormLinea] = useState('');
+  const soportaLinea = useSoportaLineaTelefonica();
   const [formCondicion, setFormCondicion] = useState('Excelente');
   const [formTipoPropiedad, setFormTipoPropiedad] = useState<'Compra' | 'Alquiler'>('Compra');
   const [formFechaFinAlquiler, setFormFechaFinAlquiler] = useState('');
@@ -47,6 +52,7 @@ export default function AsignacionExpress() {
 
   // Custodia focus
   const [usuarioFocus, setUsuarioFocus] = useState<any | null>(null);
+  const [licenciasPersona, setLicenciasPersona] = useState<any[]>([]);
   const [equiposCustodia, setEquiposCustodia] = useState<any[]>([]);
 
   // Filtros unificados 
@@ -145,7 +151,8 @@ export default function AsignacionExpress() {
         p_nombre_modelo: modeloFinal,
         p_caf: formCaf.trim() || null,
         p_especificaciones: formSpecs.trim() || null,
-        p_estado_actual: 'Disponible en Almacén TI'
+        p_estado_actual: 'Disponible en Almacén TI',
+        ...(soportaLinea ? { p_linea_telefonica: formLinea.trim() || null } : {})
       };
 
       const { data: rpcResponse, error: rpcError } = await supabase.rpc('ingresar_o_actualizar_activo', payload);
@@ -216,9 +223,23 @@ export default function AsignacionExpress() {
     cargarInformacionBase();
   }, []);
 
+  const cargarLicenciasPersona = async (userId: number) => {
+    // Si la migración de licencias aún no se ejecutó, la consulta falla: se
+    // deja la lista vacía en vez de romper la pantalla de custodia.
+    const { data, error } = await supabase
+      .from('licencias_asignaciones')
+      .select('id, cuenta_activacion, licencias(id, nombre_servicio, proveedor, plan, estado)')
+      .eq('usuario_id', userId)
+      .eq('estado_asignacion', 'Activo');
+
+    setLicenciasPersona(error ? [] : (data || []));
+  };
+
   const cargarCustodiaPersona = async (userId: number) => {
     try {
       setLoadingCustodia(true);
+      void cargarLicenciasPersona(userId);
+
       const { data, error } = await supabase
         .from('vista_activos_completa')
         .select('*')
@@ -276,17 +297,14 @@ export default function AsignacionExpress() {
   // 🔍 FILTRADO INTELIGENTE PREDICTIVO DEL SELECTOR SUPERIOR (CORREGIDO)
   const colaboradoresFiltrados = usuarios.filter(u => {
     const coincideArea = areaFiltroId === 'Todos' || String(u.area_id) === areaFiltroId;
-    // 🚀 Cambiado de busquedaPredictivaUsr a valorBuscadorUsr para que lea el datalist
-    const term = valorBuscadorUsr.toLowerCase().trim();
-    const coincideTexto = !term || String(u.nombre_completo).toLowerCase().includes(term) || String(u.dni).includes(term);
+    const coincideTexto = crearFiltro<any>(valorBuscadorUsr, ['nombre_completo', 'dni', 'areas.nombre_area', 'cargos.nombre_cargo'])(u);
     return coincideArea && coincideTexto;
   });
 
   // Filtrado de la tabla Almacén
   const activosFiltrados = activosDisponibles.filter(a => {
-    const term = busquedaHw.toLowerCase().trim();
     return (catHw === 'Todos' || String(a.categoria) === catHw) &&
-      (!term || String(a.serial_id).toLowerCase().includes(term) || String(a.marca).toLowerCase().includes(term) || String(a.modelo).toLowerCase().includes(term) || String(a.caf).toLowerCase().includes(term));
+      crearFiltro<any>(busquedaHw, ['serial_id', 'marca', 'modelo', 'caf', 'categoria', 'especificaciones', 'linea_telefonica', 'nombre_estado'])(a);
   });
 
   return (
@@ -341,6 +359,7 @@ export default function AsignacionExpress() {
                   if (!usuarioEncontrado) {
                     setUsuarioFocus(null);
                     setEquiposCustodia([]);
+                    setLicenciasPersona([]);
                   }
                 }}
                 placeholder="🔍 Haz clic o escribe para buscar por Nombre o DNI..."
@@ -380,11 +399,38 @@ export default function AsignacionExpress() {
               )}
             </div>
 
-            {/* Indicador visual de verificación exitosa */}
+            {/* Ficha del colaborador fijado. Todos estos datos ya venían en la
+                consulta `select('*, areas(*), cargos(*)')`: antes no se pintaban
+                y obligaban a consultarlos en otra pantalla. */}
             {usuarioFocus && (
-              <span className="text-[10px] text-emerald-600 font-bold animate-fade-in mt-0.5">
-                🔒 Colaborador fijado y verificado correctamente.
-              </span>
+              <div className="mt-2 bg-white border border-slate-200 rounded-xl px-3 py-2.5 shadow-sm animate-fade-in">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                  <span className="font-black text-sm text-slate-900">
+                    👤 {usuarioFocus.nombre_completo}
+                  </span>
+
+                  <span className="font-mono text-[11px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                    DNI {usuarioFocus.dni || 'S/D'}
+                  </span>
+
+                  {usuarioFocus.areas?.nombre_area && (
+                    <span className="text-[11px] font-bold" style={{ color: 'var(--color-upeu-texto)' }}>
+                      🏢 {usuarioFocus.areas.nombre_area}
+                    </span>
+                  )}
+
+                  {usuarioFocus.cargos?.nombre_cargo && (
+                    <span className="text-[11px] font-semibold text-slate-600">
+                      💼 {usuarioFocus.cargos.nombre_cargo}
+                    </span>
+                  )}
+
+                  <span className="ml-auto text-[11px] font-black text-slate-700">
+                    {equiposCustodia.length} {equiposCustodia.length === 1 ? 'equipo' : 'equipos'}
+                    {licenciasPersona.length > 0 && ` · ${licenciasPersona.length} ${licenciasPersona.length === 1 ? 'licencia' : 'licencias'}`}
+                  </span>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -393,7 +439,8 @@ export default function AsignacionExpress() {
         <div className="grid grid-cols-1 xl:grid-cols-5 gap-3 flex-1 overflow-hidden h-full items-stretch">
 
           {/* COLUMNA 1 & 2: LA CUSTODIA CON SORT */}
-          <div className="xl:col-span-2 h-full min-h-0">
+          <div className="xl:col-span-2 h-full min-h-0 flex flex-col gap-3">
+            <div className="flex-1 min-h-0">
             <TablaControl
               tituloSeccion={usuarioFocus ? `Custodia de ${usuarioFocus.nombre_completo} (${usuarioFocus.areas?.nombre_area || 'Sin Área'})` : "Custodia Actual"}
               badgeCount={usuarioFocus ? equiposCustodia.length : 0}
@@ -403,11 +450,26 @@ export default function AsignacionExpress() {
               columnas={[
                 {
                   header: "Categoría / Hardware",
-                  field: "categoria",
+                  field: "categoria", // Habilita Sort al hacer clic
+                  movil: 'titulo' as const,
                   render: (eq: any) => (
                     <div>
-                      <div className="font-bold text-slate-900">[{eq.categoria}] {eq.marca}</div>
-                      <div className="text-[9px] text-slate-400 font-mono mt-0.5">S/N: <b className="text-slate-600">{eq.serial_id}</b></div>
+                      <Link href={`/activos/${eq.id}`} className="font-bold text-slate-900 hover:underline block">
+                        [{eq.categoria}] {eq.marca} {eq.modelo}
+                      </Link>
+                      <div className="text-[10px] text-slate-400 font-mono mt-0.5">S/N: <b className="text-slate-600">{eq.serial_id}</b></div>
+                      {/* Aquí vive el número de línea en los celulares: era el dato
+                          que obligaba a abrir una segunda pestaña. */}
+                      {eq.especificaciones && (
+                        <div className="text-[10px] text-slate-500 font-medium mt-0.5 leading-tight">
+                          {eq.especificaciones}
+                        </div>
+                      )}
+                      {eq.linea_telefonica && (
+                        <div className="text-[10px] font-mono font-bold mt-0.5" style={{ color: 'var(--color-upeu-texto)' }}>
+                          📱 {eq.linea_telefonica}
+                        </div>
+                      )}
                     </div>
                   )
                 },
@@ -417,8 +479,23 @@ export default function AsignacionExpress() {
                   render: (eq: any) => <code className="bg-slate-100 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-700 text-[10px]">{eq.caf || '—'}</code>
                 },
                 {
+                  // Condición física: es lo que se verifica equipo por equipo
+                  // durante la auditoría por áreas.
+                  header: "Estado",
+                  field: "nombre_estado",
+                  render: (eq: any) => (
+                    <span
+                      className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wide text-white whitespace-nowrap"
+                      style={{ backgroundColor: eq.color_alerta || '#64748b' }}
+                    >
+                      {eq.nombre_estado || 'Sin evaluar'}
+                    </span>
+                  )
+                },
+                {
                   header: "Operación",
                   className: "text-right w-16",
+                  movil: 'accion' as const,
                   render: (eq: any) => (
                     <button type="button" onClick={() => ejecutarLiberacion(eq.id)} disabled={guardando} className="px-2 py-0.5 text-red-600 hover:bg-red-50 border border-red-100 font-bold rounded-md text-[10px] transition-all active:scale-95">
                       Quitar
@@ -427,6 +504,53 @@ export default function AsignacionExpress() {
                 }
               ]}
             />
+            </div>
+
+            {/* Licencias de software del mismo colaborador.
+                Es la razón de tener el módulo dentro del inventario: cuando
+                alguien se va, aquí se ve de una vez qué equipos recuperar y
+                qué accesos desactivar. */}
+            {usuarioFocus && (
+              <div className="bg-white border border-slate-200 rounded-xl shadow-sm flex-shrink-0 max-h-[32%] flex flex-col overflow-hidden">
+                <div className="px-4 py-2.5 bg-slate-50/70 border-b border-slate-200 flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                    🔑 Licencias
+                  </span>
+                  <span className="bg-slate-200/80 text-slate-700 font-mono text-[10px] font-bold px-2 py-0.5 rounded-full">
+                    {licenciasPersona.length}
+                  </span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto min-h-0">
+                  {licenciasPersona.length === 0 ? (
+                    <p className="text-center py-4 text-[11px] font-bold text-slate-400">
+                      Sin licencias asignadas.
+                    </p>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {licenciasPersona.map((l: any) => (
+                        <div key={l.id} className="px-4 py-2 flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-800 text-[11px] truncate">
+                              {l.licencias?.nombre_servicio || 'Licencia'}
+                            </div>
+                            <div className="text-[10px] text-slate-400 font-medium truncate">
+                              {[l.licencias?.proveedor, l.licencias?.plan].filter(Boolean).join(' · ')}
+                              {l.cuenta_activacion ? ` · ${l.cuenta_activacion}` : ''}
+                            </div>
+                          </div>
+                          {l.licencias?.estado && l.licencias.estado !== 'Activa' && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase text-white bg-rose-600 whitespace-nowrap">
+                              {l.licencias.estado}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* COLUMNA 3, 4 & 5: EL ALMACÉN TI CON FILTROS INTERNOS Y SORT */}
@@ -503,7 +627,7 @@ export default function AsignacionExpress() {
                         onClick={() => ejecutarAsignacion(a.id)}
                         disabled={guardando || !usuarioFocus || esMismoUsuario}
                         className="px-2.5 py-1 text-white text-[10px] font-bold rounded-lg shadow disabled:opacity-30 transition-all active:scale-95"
-                        style={{ backgroundColor: 'rgb(1, 71, 118)' }}
+                        style={{ backgroundColor: 'var(--color-upeu)' }}
                       >
                         {a.asignado_usuario_id ? 'Reasignar' : 'Asignar'}
                       </button>
@@ -535,7 +659,7 @@ export default function AsignacionExpress() {
                   setModalFormOpen(true);
                 }}
                 className="p-1.5 text-white font-black text-[11px] uppercase rounded-md shadow-sm transition-all"
-                style={{ backgroundColor: 'rgb(1, 71, 118)' }}
+                style={{ backgroundColor: 'var(--color-upeu)' }}
               >
                 ➕ Crear Activo
               </button>
@@ -561,6 +685,7 @@ export default function AsignacionExpress() {
         formSerie={formSerie} setFormSerie={setFormSerie}
         formCaf={formCaf} setFormCaf={setFormCaf}
         formSpecs={formSpecs} setFormSpecs={setFormSpecs}
+        formLinea={formLinea} setFormLinea={setFormLinea} soportaLinea={soportaLinea}
         formCondicion={formCondicion} setFormCondicion={setFormCondicion}
         formTipoPropiedad={formTipoPropiedad} setFormTipoPropiedad={setFormTipoPropiedad}
         formFechaFinAlquiler={formFechaFinAlquiler} setFormFechaFinAlquiler={setFormFechaFinAlquiler}

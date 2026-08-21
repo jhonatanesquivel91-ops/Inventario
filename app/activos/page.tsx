@@ -1,9 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { crearFiltro } from '@/lib/busqueda';
+import { useSoportaLineaTelefonica } from '@/lib/capacidades';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
+import { useDestacar } from '@/lib/useDestacar';
 import { BuscadorControl } from '@/components/BuscadorControl';
 import { FiltroSelect } from '@/components/FiltroSelect';
 import { ModalBase } from '@/components/ModalBase';
@@ -41,6 +45,7 @@ const ESTRUCTURA_HARDWARE: Record<string, Record<string, string[]>> = {
 };
 
 export default function StockActivosPage() {
+  const idDestacado = useDestacar();
   const [loading, setLoading] = useState(false);
   const [guardando, setGuardando] = useState(false);
 
@@ -80,6 +85,8 @@ export default function StockActivosPage() {
   const [formSerie, setFormSerie] = useState('');
   const [formCaf, setFormCaf] = useState('');
   const [formSpecs, setFormSpecs] = useState('');
+  const [formLinea, setFormLinea] = useState('');
+  const soportaLinea = useSoportaLineaTelefonica();
   const [formCondicion, setFormCondicion] = useState('Excelente');
 
   // 🆕 NUEVOS ESTADOS DE PROPIEDAD Y ADQUISICIÓN
@@ -203,7 +210,10 @@ export default function StockActivosPage() {
               p_nombre_modelo: String(f.Modelo || f.modelo || ''),
               p_caf: f.caf || f['Código Patrimonial'] || null,
               p_especificaciones: f.especificaciones || f['Especificaciones'] || null,
-              p_estado_actual: 'Disponible en Almacén TI'
+              p_estado_actual: 'Disponible en Almacén TI',
+              ...(soportaLinea
+                ? { p_linea_telefonica: String(f.linea_telefonica || f['Línea'] || f['Linea'] || f['Número de Celular'] || '').trim() || null }
+                : {})
             });
           }
         }
@@ -230,18 +240,17 @@ export default function StockActivosPage() {
   }, [activos]);
 
   const activosFiltrados = useMemo(() => {
+    // Incluye especificaciones (donde vive la línea de los celulares), estado,
+    // régimen, área y cargo: antes solo cubría serie, marca, modelo y custodio.
+    const filtroTexto = crearFiltro<any>(busqueda, [
+      'serial_id', 'marca', 'modelo', 'categoria', 'caf', 'nombre_completo',
+      'especificaciones', 'linea_telefonica', 'nombre_estado', 'tipo_propiedad', 'nombre_area',
+      'nombre_cargo', 'dni'
+    ]);
+
     return activos.filter((item) => {
       const coincideCategoria = filtroCategoria === 'Todos' || item.categoria === filtroCategoria;
-      const term = busqueda.toLowerCase().trim();
-      if (!term) return coincideCategoria;
-      return coincideCategoria && (
-        String(item.serial_id || '').toLowerCase().includes(term) ||
-        String(item.marca || '').toLowerCase().includes(term) ||
-        String(item.modelo || '').toLowerCase().includes(term) ||
-        String(item.categoria || '').toLowerCase().includes(term) ||
-        String(item.caf || '').toLowerCase().includes(term) ||
-        String(item.nombre_completo || '').toLowerCase().includes(term)
-      );
+      return coincideCategoria && filtroTexto(item);
     });
   }, [activos, busqueda, filtroCategoria]);
 
@@ -329,7 +338,7 @@ export default function StockActivosPage() {
   };
 
   const abrirModalAlta = () => {
-    setFormTipo(''); setFormMarca(''); setFormModelo(''); setFormSerie(''); setFormCaf(''); setFormSpecs('');
+    setFormTipo(''); setFormMarca(''); setFormModelo(''); setFormSerie(''); setFormCaf(''); setFormSpecs(''); setFormLinea('');
     setFormTipoPropiedad('Compra'); setFormFechaFinAlquiler('');
     // Reseteamos estados inline
     setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
@@ -345,6 +354,7 @@ export default function StockActivosPage() {
     setFormSerie(item.serial_id || '');
     setFormCaf(item.caf || '');
     setFormSpecs(item.especificaciones || '');
+    setFormLinea(item.linea_telefonica || '');
     setFormCondicion(item.nombre_estado || item.condicion || condicionesCatalogo[0]?.nombre_estado || 'Excelente');
 
     // 🆕 CARGAR VALORES ADQUIRIDOS DE LA BD
@@ -421,7 +431,11 @@ export default function StockActivosPage() {
         p_nombre_modelo: modeloFinal,
         p_caf: formCaf.trim() || null,
         p_especificaciones: formSpecs.trim() || null,
-        p_estado_actual: estadoCalculado
+        p_estado_actual: estadoCalculado,
+        // Solo se incluye si la base ya tiene la columna: enviarlo antes haría
+        // fallar la llamada completa, porque la función aún no acepta el
+        // parámetro. `soportaLinea` lo comprueba una vez por sesión.
+        ...(soportaLinea ? { p_linea_telefonica: formLinea.trim() || null } : {})
       };
 
       // Guardamos / Actualizamos la entidad base a través del RPC
@@ -598,7 +612,7 @@ export default function StockActivosPage() {
       {alerta && <div className="fixed top-4 right-4 z-[100] px-4 py-2 bg-slate-900 text-white text-xs font-black rounded-xl shadow-2xl">{alerta}</div>}
 
       <HeaderVista titulo="📦 Almacén de Activos TI" subtitulo="Control físico general, bitácoras de fallas técnicas e inyección masiva." badgeStatus="online">
-        <button onClick={abrirModalAlta} className="px-3 py-1.5 text-white text-[11px] font-black uppercase rounded-lg shadow transition-all bg-blue-800" style={{ backgroundColor: 'rgb(1, 71, 118)' }}>➕ Nuevo Activo</button>
+        <button onClick={abrirModalAlta} className="px-3 py-1.5 text-white text-[11px] font-black uppercase rounded-lg shadow transition-all bg-blue-800" style={{ backgroundColor: 'var(--color-upeu)' }}>➕ Nuevo Activo</button>
         <button onClick={() => setModalExcel(true)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-black uppercase border rounded-lg shadow-sm transition-all">📥 Importar Excel</button>
         <button onClick={ejecutarExportacionExcel} className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black uppercase rounded-lg shadow transition-all">🖨️ Exportar Malla</button>
       </HeaderVista>
@@ -606,7 +620,7 @@ export default function StockActivosPage() {
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 flex-shrink-0">
         <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-slate-400"></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Total Hardware</p><p className="text-base font-black text-slate-800 mt-1">{metricasTI.total} <span className="text-[9px] text-slate-400 font-medium">unidades</span></p></div>
-        <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full" style={{ backgroundColor: 'rgb(1, 71, 118)' }}></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">En Custodia / Uso</p><p className="text-base font-black mt-1" style={{ color: 'rgb(1, 71, 118)' }}>{metricasTI.asignados} <span className="text-[9px] text-slate-400 font-medium">bienes</span></p></div>
+        <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full" style={{ backgroundColor: 'var(--color-upeu)' }}></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">En Custodia / Uso</p><p className="text-base font-black mt-1" style={{ color: 'var(--color-upeu-texto)' }}>{metricasTI.asignados} <span className="text-[9px] text-slate-400 font-medium">bienes</span></p></div>
         <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-emerald-500"></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Stock Disponible</p><p className="text-base font-black text-emerald-600 mt-1">{metricasTI.disponibles} <span className="text-[9px] text-emerald-400 font-medium">libres</span></p></div>
         <div className="bg-white border border-slate-200/80 p-3 rounded-xl shadow-sm relative overflow-hidden"><div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div><p className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Dados de Baja</p><p className="text-base font-black text-red-600 mt-1">{metricasTI.bajas} <span className="text-[9px] text-red-400 font-medium">inactivos</span></p></div>
       </div>
@@ -653,20 +667,29 @@ export default function StockActivosPage() {
 
       {/* TABLA PRINCIPAL */}
       <div className="flex-1 min-h-0 overflow-hidden bg-white rounded-xl border flex flex-col">
-        <TablaControl tituloSeccion="Malla General de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} onRefresh={cargarDatos} columnas={[
+        <TablaControl tituloSeccion="Malla General de Activos" badgeCount={activosFiltrados.length} data={activosFiltrados} loading={loading} idDestacado={idDestacado} onRefresh={cargarDatos} columnas={[
           {
             header: "✓",
             className: "w-12 text-center",
+            movil: 'oculta' as const,
             render: (a) => <input type="checkbox" checked={seleccionados.includes(a.id)} onChange={() => setSeleccionados(prev => prev.includes(a.id) ? prev.filter(id => id !== a.id) : [...prev, a.id])} className="w-4 h-4 accent-slate-900 cursor-pointer" />
           },
           {
             header: "Hardware / Especificación",
             field: "categoria",
+            movil: 'titulo' as const,
             render: (a) => (
               <div>
-                <span className="font-black text-xs" style={{ color: 'rgb(1, 71, 118)' }}>[{a.categoria}]</span>
-                <span className="text-slate-800 ml-1.5 font-bold text-xs">{a.marca} {a.modelo}</span>
+                <Link href={`/activos/${a.id}`} className="group">
+                  <span className="font-black text-xs group-hover:underline" style={{ color: 'var(--color-upeu-texto)' }}>[{a.categoria}]</span>
+                  <span className="text-slate-800 ml-1.5 font-bold text-xs group-hover:underline">{a.marca} {a.modelo}</span>
+                </Link>
                 {a.especificaciones && <div className="text-[10px] text-slate-400 font-medium mt-0.5">{a.especificaciones}</div>}
+                {a.linea_telefonica && (
+                  <div className="text-[10px] font-mono font-bold mt-0.5" style={{ color: 'var(--color-upeu-texto)' }}>
+                    📱 {a.linea_telefonica}
+                  </div>
+                )}
               </div>
             )
           },
@@ -676,7 +699,7 @@ export default function StockActivosPage() {
             render: (a) => (
               <div className="font-mono text-[10px] font-bold leading-tight">
                 <div>S/N: <span className="text-slate-900 font-black">{a.serial_id}</span></div>
-                {a.caf && <div style={{ color: 'rgb(1, 71, 118)' }}>CAF: {a.caf}</div>}
+                {a.caf && <div style={{ color: 'var(--color-upeu-texto)' }}>CAF: {a.caf}</div>}
               </div>
             )
           },
@@ -836,6 +859,7 @@ export default function StockActivosPage() {
         formSerie={formSerie} setFormSerie={setFormSerie}
         formCaf={formCaf} setFormCaf={setFormCaf}
         formSpecs={formSpecs} setFormSpecs={setFormSpecs}
+        formLinea={formLinea} setFormLinea={setFormLinea} soportaLinea={soportaLinea}
         formCondicion={formCondicion} setFormCondicion={setFormCondicion}
         formTipoPropiedad={formTipoPropiedad} setFormTipoPropiedad={setFormTipoPropiedad}
         formFechaFinAlquiler={formFechaFinAlquiler} setFormFechaFinAlquiler={setFormFechaFinAlquiler}
@@ -865,7 +889,7 @@ export default function StockActivosPage() {
               <input type="file" accept=".xlsx, .xls" onChange={(e) => setArchivoExcel(e.target.files?.[0] || null)} className="text-xs text-slate-500 bg-white p-2 border rounded-lg w-full max-w-xs" required />
               {archivoExcel && <p className="text-xs text-emerald-700 font-black mt-2">📎 Archivo cargado: {archivoExcel.name}</p>}
             </div>
-            <button type="submit" disabled={guardando || !archivoExcel} style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider shadow">{guardando ? "Sincronizando Libro..." : "🚀 Iniciar Carga Masiva"}</button>
+            <button type="submit" disabled={guardando || !archivoExcel} style={{ backgroundColor: 'var(--color-upeu)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider shadow">{guardando ? "Sincronizando Libro..." : "🚀 Iniciar Carga Masiva"}</button>
           </form>
         </div>
       </ModalBase>

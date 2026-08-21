@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
+import { crearFiltro } from '@/lib/busqueda';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
 import { BuscadorControl } from '@/components/BuscadorControl';
@@ -116,16 +117,10 @@ export default function ConfiguracionPage() {
     if (!term) return fuente;
 
     // FILTRADO POR TEXTO GLOBAL (BUSCADOR)
-    return fuente.filter(item => {
-      return (
-        String(item.nombre_categoria || '').toLowerCase().includes(term) ||
-        String(item.nombre_marca || '').toLowerCase().includes(term) ||
-        String(item.nombre_modelo || '').toLowerCase().includes(term) ||
-        String(item.categoria_nombre || '').toLowerCase().includes(term) ||
-        String(item.marca_nombre || '').toLowerCase().includes(term) ||
-        String(item.nombre_estado || '').toLowerCase().includes(term)
-      );
-    });
+    return fuente.filter(crearFiltro<any>(busqueda, [
+      'nombre_categoria', 'nombre_marca', 'nombre_modelo',
+      'categoria_nombre', 'marca_nombre', 'nombre_estado'
+    ]));
   }, [subTab, categorias, marcas, modelos, condiciones, busqueda, filtroFamiliaTabla]);
 
   const manejarGuardar = async (e: React.FormEvent) => {
@@ -241,7 +236,7 @@ export default function ConfiguracionPage() {
               key={tab}
               onClick={() => setSubTab(tab)}
               className={`px-3 py-1.5 rounded-lg transition-all capitalize ${subTab === tab ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500'}`}
-              style={subTab === tab ? { color: 'rgb(1, 71, 118)' } : {}}
+              style={subTab === tab ? { color: 'var(--color-upeu-texto)' } : {}}
             >
               {tab === 'categorias' ? 'Familias' : tab === 'condiciones' ? 'Estados' : tab}
             </button>

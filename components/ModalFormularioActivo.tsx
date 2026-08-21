@@ -22,6 +22,9 @@ interface ModalFormularioActivoProps {
   formSerie: string; setFormSerie: (v: string) => void;
   formCaf: string; setFormCaf: (v: string) => void;
   formSpecs: string; setFormSpecs: (v: string) => void;
+  formLinea: string; setFormLinea: (v: string) => void;
+  /** La columna existe en la base. Si no, el campo no se muestra. */
+  soportaLinea?: boolean;
   formCondicion: string; setFormCondicion: (v: string) => void;
   formTipoPropiedad: 'Compra' | 'Alquiler'; setFormTipoPropiedad: (v: 'Compra' | 'Alquiler') => void;
   formFechaFinAlquiler: string; setFormFechaFinAlquiler: (v: string) => void;
@@ -38,11 +41,18 @@ interface ModalFormularioActivoProps {
 export function ModalFormularioActivo({
   isOpen, onClose, modo, guardando, condicionesCatalogo, categoriasCatalogo, marcasCatalogo, modelosCatalogo,
   formTipo, setFormTipo, formMarca, setFormMarca, formModelo, setFormModelo, formSerie, setFormSerie,
-  formCaf, setFormCaf, formSpecs, setFormSpecs, formCondicion, setFormCondicion, formTipoPropiedad, setFormTipoPropiedad,
+  formCaf, setFormCaf, formSpecs, setFormSpecs, formLinea, setFormLinea, soportaLinea = false, formCondicion, setFormCondicion, formTipoPropiedad, setFormTipoPropiedad,
   formFechaFinAlquiler, setFormFechaFinAlquiler, creandoNuevaFamilia, setCreandoNuevaFamilia, nuevaFamiliaNombre, setNuevaFamiliaNombre,
   creandoNuevaMarca, setCreandoNuevaMarca, nuevaMarcaNombre, setNuevaMarcaNombre, creandoNuevoModelo, setCreandoNuevoModelo, nuevoModeloNombre, setNuevoModeloNombre,
   onSubmit
 }: ModalFormularioActivoProps) {
+
+  // Las categorías de telefonía llevan un campo extra. Se compara sin tildes
+  // ni mayúsculas porque el catálogo lo escribe la persona que lo registra.
+  const esCelular = useMemo(() => {
+    const t = String(formTipo || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return t.includes('celular') || t.includes('telefono') || t.includes('movil') || t.includes('smartphone');
+  }, [formTipo]);
 
   // Lógica de filtrado en cascada encapsulada
   const marcasFiltradasBD = useMemo(() => {
@@ -163,9 +173,30 @@ export function ModalFormularioActivo({
         <div>
           <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Especificaciones Técnicas</label>
           <input type="text" value={formSpecs} onChange={(e) => setFormSpecs(e.target.value)} placeholder="Ej: Core i5, 16GB RAM, 512GB SSD" className="w-full p-2 border rounded-lg outline-none text-slate-800" />
+
+          {/* La plantilla sigue siendo una sola: este campo simplemente aparece
+              cuando la categoría lo pide, en vez de crear otro formulario. */}
+          {esCelular && soportaLinea && (
+            <div className="mt-3">
+              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">
+                Línea Telefónica
+              </label>
+              <input
+                type="tel"
+                inputMode="numeric"
+                value={formLinea}
+                onChange={(e) => setFormLinea(e.target.value)}
+                placeholder="Ej: 987654321"
+                className="w-full p-2 border rounded-lg outline-none text-slate-800 font-mono"
+              />
+              <p className="text-[10px] text-slate-400 font-medium mt-1">
+                Guardar el número aquí lo hace buscable, en vez de perderse dentro de las especificaciones.
+              </p>
+            </div>
+          )}
         </div>
 
-        <button type="submit" disabled={guardando} style={{ backgroundColor: 'rgb(1, 71, 118)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider">
+        <button type="submit" disabled={guardando} style={{ backgroundColor: 'var(--color-upeu)' }} className="w-full py-2.5 text-white font-black rounded-xl uppercase tracking-wider">
           {guardando ? "Sincronizando..." : "💾 Sincronizar Registro"}
         </button>
       </form>

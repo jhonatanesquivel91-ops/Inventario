@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { obtenerUsuario } from '@/lib/supabase-server';
 
 export async function POST(req: Request) {
   try {
+    const usuario = await obtenerUsuario();
+    if (!usuario) {
+      return NextResponse.json({ error: 'Sesión expirada.' }, { status: 401 });
+    }
+
     const { activo, notas, contextoAdicional } = await req.json();
 
     // Mapeamos las notas con su tipo y fecha para el análisis de la IA
