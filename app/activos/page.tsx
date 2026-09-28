@@ -7,6 +7,7 @@ import { crearFiltro } from '@/lib/busqueda';
 import { useSoportaLineaTelefonica, useSoportaFechaAdquisicion } from '@/lib/capacidades';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
+import { columnaAdquisicion } from '@/components/CeldaAdquisicion';
 import { useDestacar } from '@/lib/useDestacar';
 import { BuscadorControl } from '@/components/BuscadorControl';
 import { FiltroSelect } from '@/components/FiltroSelect';
@@ -725,11 +726,6 @@ export default function StockActivosPage() {
                     {esAlquiler ? '💼 Alquiler' : '💼 Compra'}
                   </span>
 
-                  {a.fecha_adquisicion && (
-                    <div className="font-mono text-[10px] text-slate-500 font-bold mt-1 leading-none">
-                      Adq. {new Date(`${a.fecha_adquisicion}T00:00:00`).toLocaleDateString('es-PE')}
-                    </div>
-                  )}
                   {esAlquiler && a.fecha_fin_alquiler && (
                     <div className="font-mono text-[10px] leading-none mt-1">
                       <div className="text-slate-600 font-bold">{new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE')}</div>
@@ -745,6 +741,7 @@ export default function StockActivosPage() {
               );
             }
           },
+          columnaAdquisicion,
           {
             header: "Condición",
             field: "nombre_estado",

@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { crearFiltro } from '@/lib/busqueda';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
+import { columnaAdquisicion } from '@/components/CeldaAdquisicion';
 import { useDestacar } from '@/lib/useDestacar';
 import { ModalBase } from '@/components/ModalBase';
 import { BitacoraNotas } from '@/components/BitacoraNotas';
@@ -605,6 +606,7 @@ export default function PaginaReportes() {
         );
       }
     },
+    columnaAdquisicion,
     {
       header: "Asignado Desde",
       field: "fecha_registro",

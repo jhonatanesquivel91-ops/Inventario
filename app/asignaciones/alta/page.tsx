@@ -7,6 +7,7 @@ import { crearFiltro } from '@/lib/busqueda';
 import { useSoportaLineaTelefonica, useSoportaFechaAdquisicion } from '@/lib/capacidades';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
+import { columnaAdquisicion } from '@/components/CeldaAdquisicion';
 import { ModalFormularioActivo } from '@/components/ModalFormularioActivo';
 
 export default function AsignacionExpress() {
@@ -482,6 +483,7 @@ export default function AsignacionExpress() {
                   field: "caf",
                   render: (eq: any) => <code className="bg-slate-100 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-700 text-[10px]">{eq.caf || '—'}</code>
                 },
+                columnaAdquisicion,
                 {
                   // Condición física: es lo que se verifica equipo por equipo
                   // durante la auditoría por áreas.
@@ -592,6 +594,7 @@ export default function AsignacionExpress() {
                     </div>
                   )
                 },
+                columnaAdquisicion,
                 {
                   header: "Custodio / Estado",
                   field: "estado_actual",

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
+import { columnaAdquisicion } from '@/components/CeldaAdquisicion';
 
 export default function TransferenciasEspejo() {
   const [loading, setLoading] = useState(false);
@@ -229,6 +230,7 @@ export default function TransferenciasEspejo() {
                     field: "caf",
                     render: (eq: any) => <code className="bg-slate-50 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-600 text-[10px]">{eq.caf || '—'}</code>
                   },
+                  columnaAdquisicion,
                   {
                     header: "Acciones",
                     className: "text-right w-28",
@@ -303,6 +305,7 @@ export default function TransferenciasEspejo() {
                     field: "caf",
                     render: (eq: any) => <code className="bg-slate-50 border px-1.5 py-0.5 rounded font-mono font-bold text-slate-600 text-[10px]">{eq.caf || '—'}</code>
                   },
+                  columnaAdquisicion,
                   {
                     header: "Acciones",
                     className: "text-right w-28",
