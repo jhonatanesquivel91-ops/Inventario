@@ -4,7 +4,7 @@ import Link from 'next/link';
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../../lib/supabase';
 import { crearFiltro } from '@/lib/busqueda';
-import { useSoportaLineaTelefonica } from '@/lib/capacidades';
+import { useSoportaLineaTelefonica, useSoportaFechaAdquisicion } from '@/lib/capacidades';
 import { HeaderVista } from '@/components/HeaderVista';
 import { TablaControl } from '@/components/TablaControl';
 import { useDestacar } from '@/lib/useDestacar';
@@ -92,6 +92,8 @@ export default function StockActivosPage() {
   // 🆕 NUEVOS ESTADOS DE PROPIEDAD Y ADQUISICIÓN
   const [formTipoPropiedad, setFormTipoPropiedad] = useState<'Compra' | 'Alquiler'>('Compra');
   const [formFechaFinAlquiler, setFormFechaFinAlquiler] = useState('');
+  const [formFechaAdquisicion, setFormFechaAdquisicion] = useState('');
+  const soportaAdquisicion = useSoportaFechaAdquisicion();
 
   const [condicionesCatalogo, setCondicionesCatalogo] = useState<any[]>([]);
 
@@ -316,6 +318,7 @@ export default function StockActivosPage() {
           'Código CAF': a.caf || 'N/A',
           'Especificaciones Técnicas': a.especificaciones || 'Sin detalles', // 👈 ¡COLUMNA RESTAURADA AQUÍ!
           'Régimen Propiedad': a.tipo_propiedad || 'Compra',
+          'Fecha de Adquisición': a.fecha_adquisicion ? new Date(`${a.fecha_adquisicion}T00:00:00`).toLocaleDateString('es-PE') : '',
           'Vencimiento Alquiler': a.fecha_fin_alquiler ? new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE') : 'N/A',
           'Condición Física': a.condicion || 'Excelente',
           'Estado Operativo': a.estado_actual,
@@ -339,7 +342,7 @@ export default function StockActivosPage() {
 
   const abrirModalAlta = () => {
     setFormTipo(''); setFormMarca(''); setFormModelo(''); setFormSerie(''); setFormCaf(''); setFormSpecs(''); setFormLinea('');
-    setFormTipoPropiedad('Compra'); setFormFechaFinAlquiler('');
+    setFormTipoPropiedad('Compra'); setFormFechaFinAlquiler(''); setFormFechaAdquisicion('');
     // Reseteamos estados inline
     setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
     setCreandoNuevaMarca(false); setNuevaMarcaNombre('');
@@ -360,6 +363,7 @@ export default function StockActivosPage() {
     // 🆕 CARGAR VALORES ADQUIRIDOS DE LA BD
     setFormTipoPropiedad(item.tipo_propiedad === 'Alquiler' ? 'Alquiler' : 'Compra');
     setFormFechaFinAlquiler(item.fecha_fin_alquiler || '');
+    setFormFechaAdquisicion(item.fecha_adquisicion || '');
 
     setModalForm({ open: true, modo: 'edicion', activo: item });
   };
@@ -476,7 +480,10 @@ export default function StockActivosPage() {
           .from('activos')
           .update({
             tipo_propiedad: formTipoPropiedad,
-            fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler || null : null
+            fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler || null : null,
+            // Solo si la columna existe: enviarla antes de la migración haría
+            // fallar este update y con él todo el guardado del activo.
+            ...(soportaAdquisicion ? { fecha_adquisicion: formFechaAdquisicion || null } : {})
           })
           .eq('id', activoIdReal);
 
@@ -718,6 +725,11 @@ export default function StockActivosPage() {
                     {esAlquiler ? '💼 Alquiler' : '💼 Compra'}
                   </span>
 
+                  {a.fecha_adquisicion && (
+                    <div className="font-mono text-[10px] text-slate-500 font-bold mt-1 leading-none">
+                      Adq. {new Date(`${a.fecha_adquisicion}T00:00:00`).toLocaleDateString('es-PE')}
+                    </div>
+                  )}
                   {esAlquiler && a.fecha_fin_alquiler && (
                     <div className="font-mono text-[10px] leading-none mt-1">
                       <div className="text-slate-600 font-bold">{new Date(a.fecha_fin_alquiler).toLocaleDateString('es-PE')}</div>
@@ -863,6 +875,7 @@ export default function StockActivosPage() {
         formCondicion={formCondicion} setFormCondicion={setFormCondicion}
         formTipoPropiedad={formTipoPropiedad} setFormTipoPropiedad={setFormTipoPropiedad}
         formFechaFinAlquiler={formFechaFinAlquiler} setFormFechaFinAlquiler={setFormFechaFinAlquiler}
+        formFechaAdquisicion={formFechaAdquisicion} setFormFechaAdquisicion={setFormFechaAdquisicion} soportaAdquisicion={soportaAdquisicion}
         creandoNuevaFamilia={creandoNuevaFamilia} setCreandoNuevaFamilia={setCreandoNuevaFamilia}
         nuevaFamiliaNombre={nuevaFamiliaNombre} setNuevaFamiliaNombre={setNuevaFamiliaNombre}
         creandoNuevaMarca={creandoNuevaMarca} setCreandoNuevaMarca={setCreandoNuevaMarca}

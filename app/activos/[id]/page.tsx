@@ -16,6 +16,22 @@ function fecha(valor: string | null | undefined) {
   });
 }
 
+/** Antigüedad legible: sirve para decidir renovaciones de equipo. */
+function antiguedad(valor: string) {
+  const inicio = new Date(`${valor}T00:00:00`);
+  if (isNaN(inicio.getTime())) return '';
+  const hoy = new Date();
+  let meses = (hoy.getFullYear() - inicio.getFullYear()) * 12 + (hoy.getMonth() - inicio.getMonth());
+  if (hoy.getDate() < inicio.getDate()) meses -= 1;
+  if (meses < 1) return 'menos de un mes';
+  const anios = Math.floor(meses / 12);
+  const resto = meses % 12;
+  const partes = [];
+  if (anios) partes.push(`${anios} ${anios === 1 ? 'año' : 'años'}`);
+  if (resto) partes.push(`${resto} ${resto === 1 ? 'mes' : 'meses'}`);
+  return `hace ${partes.join(' y ')}`;
+}
+
 function Dato({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
@@ -226,6 +242,12 @@ export default function FichaActivo() {
             <Dato rotulo="Código CAF">
               <span className="font-mono">{activo.caf}</span>
             </Dato>
+            {activo.fecha_adquisicion && (
+              <Dato rotulo={esAlquiler ? 'Inicio de contrato' : 'Adquirido'}>
+                {fecha(activo.fecha_adquisicion)}
+                <span className="block text-[10px] font-medium text-slate-400">{antiguedad(activo.fecha_adquisicion)}</span>
+              </Dato>
+            )}
             <Dato rotulo="Régimen">{esAlquiler ? '💼 Alquiler' : '💼 Compra'}</Dato>
             {esAlquiler && (
               <Dato rotulo="Fin de alquiler">{fecha(activo.fecha_fin_alquiler)}</Dato>
