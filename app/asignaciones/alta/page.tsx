@@ -4,7 +4,7 @@ import Link from 'next/link';
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { crearFiltro } from '@/lib/busqueda';
-import { useSoportaLineaTelefonica } from '@/lib/capacidades';
+import { useSoportaLineaTelefonica, useSoportaFechaAdquisicion } from '@/lib/capacidades';
 import { ContenedorVista } from '@/components/ContenedorVista';
 import { TablaControl } from '@/components/TablaControl';
 import { ModalFormularioActivo } from '@/components/ModalFormularioActivo';
@@ -29,6 +29,8 @@ export default function AsignacionExpress() {
   const [formCondicion, setFormCondicion] = useState('Excelente');
   const [formTipoPropiedad, setFormTipoPropiedad] = useState<'Compra' | 'Alquiler'>('Compra');
   const [formFechaFinAlquiler, setFormFechaFinAlquiler] = useState('');
+  const [formFechaAdquisicion, setFormFechaAdquisicion] = useState('');
+  const soportaAdquisicion = useSoportaFechaAdquisicion();
 
   // Creadores rápidos inline
   const [creandoNuevaFamilia, setCreandoNuevaFamilia] = useState(false);
@@ -114,6 +116,7 @@ export default function AsignacionExpress() {
     setFormCondicion('Excelente');
     setFormTipoPropiedad('Compra');
     setFormFechaFinAlquiler('');
+    setFormFechaAdquisicion('');
     setCreandoNuevaFamilia(false); setNuevaFamiliaNombre('');
     setCreandoNuevaMarca(false); setNuevaMarcaNombre('');
     setCreandoNuevoModelo(false); setNuevoModeloNombre('');
@@ -189,7 +192,8 @@ export default function AsignacionExpress() {
           .from('activos')
           .update({
             tipo_propiedad: formTipoPropiedad,
-            fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler || null : null
+            fecha_fin_alquiler: formTipoPropiedad === 'Alquiler' ? formFechaFinAlquiler || null : null,
+            ...(soportaAdquisicion ? { fecha_adquisicion: formFechaAdquisicion || null } : {})
           })
           .eq('id', idDesenvuelto);
 
@@ -689,6 +693,7 @@ export default function AsignacionExpress() {
         formCondicion={formCondicion} setFormCondicion={setFormCondicion}
         formTipoPropiedad={formTipoPropiedad} setFormTipoPropiedad={setFormTipoPropiedad}
         formFechaFinAlquiler={formFechaFinAlquiler} setFormFechaFinAlquiler={setFormFechaFinAlquiler}
+        formFechaAdquisicion={formFechaAdquisicion} setFormFechaAdquisicion={setFormFechaAdquisicion} soportaAdquisicion={soportaAdquisicion}
         creandoNuevaFamilia={creandoNuevaFamilia} setCreandoNuevaFamilia={setCreandoNuevaFamilia}
         nuevaFamiliaNombre={nuevaFamiliaNombre} setNuevaFamiliaNombre={setNuevaFamiliaNombre}
         creandoNuevaMarca={creandoNuevaMarca} setCreandoNuevaMarca={setCreandoNuevaMarca}

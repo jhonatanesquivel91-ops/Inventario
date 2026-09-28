@@ -28,6 +28,9 @@ interface ModalFormularioActivoProps {
   formCondicion: string; setFormCondicion: (v: string) => void;
   formTipoPropiedad: 'Compra' | 'Alquiler'; setFormTipoPropiedad: (v: 'Compra' | 'Alquiler') => void;
   formFechaFinAlquiler: string; setFormFechaFinAlquiler: (v: string) => void;
+  /** Opcionales: el campo solo se muestra si la columna existe en la base. */
+  formFechaAdquisicion?: string; setFormFechaAdquisicion?: (v: string) => void;
+  soportaAdquisicion?: boolean;
 
   // Estados inline creadores
   creandoNuevaFamilia: boolean; setCreandoNuevaFamilia: (b: boolean) => void;
@@ -42,7 +45,9 @@ export function ModalFormularioActivo({
   isOpen, onClose, modo, guardando, condicionesCatalogo, categoriasCatalogo, marcasCatalogo, modelosCatalogo,
   formTipo, setFormTipo, formMarca, setFormMarca, formModelo, setFormModelo, formSerie, setFormSerie,
   formCaf, setFormCaf, formSpecs, setFormSpecs, formLinea, setFormLinea, soportaLinea = false, formCondicion, setFormCondicion, formTipoPropiedad, setFormTipoPropiedad,
-  formFechaFinAlquiler, setFormFechaFinAlquiler, creandoNuevaFamilia, setCreandoNuevaFamilia, nuevaFamiliaNombre, setNuevaFamiliaNombre,
+  formFechaFinAlquiler, setFormFechaFinAlquiler,
+  formFechaAdquisicion = '', setFormFechaAdquisicion, soportaAdquisicion = false,
+  creandoNuevaFamilia, setCreandoNuevaFamilia, nuevaFamiliaNombre, setNuevaFamiliaNombre,
   creandoNuevaMarca, setCreandoNuevaMarca, nuevaMarcaNombre, setNuevaMarcaNombre, creandoNuevoModelo, setCreandoNuevoModelo, nuevoModeloNombre, setNuevoModeloNombre,
   onSubmit
 }: ModalFormularioActivoProps) {
@@ -149,7 +154,7 @@ export function ModalFormularioActivo({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 bg-slate-50 p-2.5 border rounded-xl">
+        <div className={`grid grid-cols-2 ${soportaAdquisicion ? 'sm:grid-cols-3' : ''} gap-3 bg-slate-50 p-2.5 border rounded-xl`}>
           <div>
             <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">Régimen Inmueble/Bien *</label>
             <select value={formTipoPropiedad} onChange={(e) => setFormTipoPropiedad(e.target.value as 'Compra' | 'Alquiler')} className="w-full p-2 border rounded-lg bg-white font-bold text-slate-700 outline-none">
@@ -157,6 +162,20 @@ export function ModalFormularioActivo({
               <option value="Alquiler">💼 Alquiler</option>
             </select>
           </div>
+          {soportaAdquisicion && setFormFechaAdquisicion && (
+            <div>
+              <label className="block font-bold text-slate-500 uppercase text-[10px] mb-1">
+                {formTipoPropiedad === 'Alquiler' ? 'Inicio de Contrato' : 'Fecha de Adquisición'}
+              </label>
+              <input
+                type="date"
+                value={formFechaAdquisicion}
+                onChange={(e) => setFormFechaAdquisicion(e.target.value)}
+                max={new Date().toISOString().slice(0, 10)}
+                className="w-full p-1.5 border rounded-lg outline-none font-mono font-bold text-xs bg-white text-slate-800 border-slate-200"
+              />
+            </div>
+          )}
           <div>
             <label className={`block font-bold uppercase text-[10px] mb-1 ${formTipoPropiedad === 'Alquiler' ? 'text-purple-600 font-black' : 'text-slate-400'}`}>Fin de Contrato {formTipoPropiedad === 'Alquiler' && '*'}</label>
             <input type="date" value={formFechaFinAlquiler} onChange={(e) => setFormFechaFinAlquiler(e.target.value)} disabled={formTipoPropiedad === 'Compra'} className={`w-full p-1.5 border rounded-lg outline-none font-mono font-bold text-xs ${formTipoPropiedad === 'Compra' ? 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200' : 'bg-white text-purple-900 border-purple-300'}`} required={formTipoPropiedad === 'Alquiler'} />
